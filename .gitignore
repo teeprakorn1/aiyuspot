@@ -1,0 +1,8 @@
+*.log
+nohup.out
+*.ko
+*.o
+*.mod*
+build/
+.DS_Store
+Thumbs.db
