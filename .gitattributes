@@ -1,0 +1,10 @@
+# aiyuspot runs .sh/.c inside WSL (must stay LF) while .bat/.ps1
+# run on Windows (CRLF is conventional there).
+*.sh    text eol=lf
+*.c     text eol=lf
+test/linux/stubs/bin/* text eol=lf
+*.yml   text eol=lf
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
+*.md    text eol=crlf
+*.txt   text eol=crlf

@@ -5,8 +5,8 @@
 #
 # Usage: kali-wsl-hotspot.sh [SSID] [MODE] [KEY]
 #   SSID  network name                 (default: aiyuspot)
-#   MODE  wep | open | wpa2            (default: wep)
-#   KEY   WEP: 5 or 13 ASCII chars; WPA2: >= 8 chars
+#   MODE  wep | open | wpa2            (default: wpa2)
+#   KEY   WEP: 5 or 13 ASCII bytes; WPA2: 8-63 chars
 #         (default: aiyu1 for wep, aiyuspot for wpa2)
 #
 # Environment: runs as root inside the kali-linux WSL2 distro.
@@ -20,23 +20,57 @@
 set -e
 
 HOTSSID="${1:-aiyuspot}"
-MODE="${2:-wep}"
-HOTPASS="${3:-aiyu1}"
+MODE="${2:-wpa2}"
+HOTPASS="${3:-}"
 HOTNET="192.168.50.0/24"
 HOTIP="192.168.50.1"
+HOSTAPD_CONF="${HOSTAPD_CONF:-/etc/hostapd/hostapd.conf}"
+DNSMASQ_CONF="${DNSMASQ_CONF:-/etc/dnsmasq.conf}"
 
 UPLINK_IF="eth0"
 
 [ "$EUID" -ne 0 ] && { echo "Run as root"; exit 1; }
 
+# --- Validate inputs before touching any interface or file ---
+case "$MODE" in
+  wep|open|wpa2) ;;
+  *) echo "Unknown mode '$MODE' - use: wep | open | wpa2"; exit 2 ;;
+esac
+
+# Reject SSIDs that could inject config lines or break the beacon.
+ssid_bytes=$(printf %s "$HOTSSID" | wc -c)
+if [ "$ssid_bytes" -lt 1 ] || [ "$ssid_bytes" -gt 32 ] \
+   || [[ "$HOTSSID" == *'"'* || "$HOTSSID" == *$'\n'* || "$HOTSSID" == *$'\r'* ]]; then
+  echo "SSID must be 1-32 bytes and contain no quotes or control characters"
+  exit 2
+fi
+
+# Key defaults per mode + length checks (byte counts, not characters).
+if [ -z "$HOTPASS" ]; then
+  [ "$MODE" = "wep" ]  && HOTPASS="aiyu1"
+  [ "$MODE" = "wpa2" ] && HOTPASS="aiyuspot"
+fi
+pass_bytes=$(printf %s "$HOTPASS" | wc -c)
+if [ "$MODE" = "wep" ]; then
+  if [ "$pass_bytes" -ne 5 ] && [ "$pass_bytes" -ne 13 ]; then
+    echo "WEP key must be exactly 5 or 13 ASCII characters"
+    exit 2
+  fi
+elif [ "$MODE" = "wpa2" ]; then
+  if [ "$pass_bytes" -lt 8 ] || [ "$pass_bytes" -gt 63 ]; then
+    echo "WPA2 passphrase must be 8-63 characters"
+    exit 2
+  fi
+fi
+
 # Load the driver for whichever adapter is attached
 # (backup; the launcher already modprobes before calling us).
-if lsusb | grep -qi '148f:2573'; then
-  modprobe rt73usb 2>/dev/null && echo "rt73usb: OK" || true
-elif lsusb | grep -qi '3625:0110'; then
+lsusb | grep -qi '148f:2573' && { modprobe rt73usb 2>/dev/null && echo "rt73usb: OK"; }
+if lsusb | grep -qi '3625:0110'; then
   modprobe aic_load_fw 2>/dev/null || true
   modprobe aic8800_fdrv 2>/dev/null && echo "aic8800_fdrv: OK" || true
 fi
+true
 
 # Pick the wireless iface bound to a supported adapter driver.
 # Preference order: aic8800_fdrv (TX1U) -> rt73usb (RT73) -> any wl* iface.
@@ -64,10 +98,13 @@ rebind_aic() {
     [ -f "$p/idVendor" ] || continue
     [ "$(cat "$p/idVendor" 2>/dev/null)" = "3625" ] || continue
     dev=$(basename "$i")
-    echo "$dev" > /sys/bus/usb/drivers/aic8800_fdrv/unbind 2>/dev/null || true
+    echo "$dev" > /sys/bus/usb/drivers/aic8800_fdrv/unbind 2>/dev/null || continue
     sleep 1
-    echo "$dev" > /sys/bus/usb/drivers/aic8800_fdrv/bind 2>/dev/null || true
-    echo "re-probed $dev on aic8800_fdrv"
+    if echo "$dev" > /sys/bus/usb/drivers/aic8800_fdrv/bind 2>/dev/null; then
+      echo "re-probed $dev on aic8800_fdrv"
+    else
+      echo "re-probe FAILED for $dev" >&2
+    fi
   done
   return 0
 }
@@ -98,20 +135,17 @@ pkill -x hostapd-wep 2>/dev/null || true
 pkill -x hostapd 2>/dev/null || true
 ip link set "$WIFI_IF" down 2>/dev/null || true
 iw dev "$WIFI_IF" set type managed 2>/dev/null || true
-ip link set "$WIFI_IF" up 2>/dev/null || { echo "WiFi interface not found"; exit 1; }
-if ! iw list 2>/dev/null | awk '/Supported interface modes/{f=1} f&&/^}/{f=0} f' | grep -qw 'AP'; then
+ip link set "$WIFI_IF" up 2>/dev/null || { echo "Failed to bring up $WIFI_IF"; exit 1; }
+# iw list indents section items by two tabs; a lone \t line ends the block.
+if ! iw list 2>/dev/null | awk '/Supported interface modes/{f=1;next} f&&/^\t\t/{print} f&&!/^\t\t/{f=0}' | grep -qw 'AP'; then
   echo "WARNING: $WIFI_IF does not advertise AP mode - hostapd may fail."
-  echo "         (TX1U/aic8800 AP support is experimental; RT73 is verified.)"
+  echo "         (Both adapters verified in AP mode; RT73 WPA2 uses TKIP fallback.)"
 fi
 ip addr replace "$HOTIP/24" dev "$WIFI_IF"
 
 if [ "$MODE" = "wpa2" ]; then
-  if [ "${#HOTPASS}" -lt 8 ]; then
-    echo "WPA2 passphrase must be at least 8 characters"
-    exit 1
-  fi
-  HOSTAPD_BIN="/usr/sbin/hostapd"
-  cat > /etc/hostapd/hostapd.conf <<EOF
+  HOSTAPD_BIN="${HOSTAPD_WPA2_BIN:-/usr/sbin/hostapd}"
+  cat > "$HOSTAPD_CONF" <<EOF
 interface=$WIFI_IF
 driver=nl80211
 ssid=$HOTSSID
@@ -123,8 +157,8 @@ rsn_pairwise=CCMP
 wpa_passphrase=$HOTPASS
 EOF
 elif [ "$MODE" = "open" ]; then
-  HOSTAPD_BIN="/usr/local/sbin/hostapd-wep"
-  cat > /etc/hostapd/hostapd.conf <<EOF
+  HOSTAPD_BIN="${HOSTAPD_WEP_BIN:-/usr/local/sbin/hostapd-wep}"
+  cat > "$HOSTAPD_CONF" <<EOF
 interface=$WIFI_IF
 driver=nl80211
 ssid=$HOTSSID
@@ -133,12 +167,8 @@ channel=6
 auth_algs=1
 EOF
 else
-  if [ "${#HOTPASS}" -ne 5 ] && [ "${#HOTPASS}" -ne 13 ]; then
-    echo "WEP key must be exactly 5 or 13 ASCII characters"
-    exit 1
-  fi
-  HOSTAPD_BIN="/usr/local/sbin/hostapd-wep"
-  cat > /etc/hostapd/hostapd.conf <<EOF
+  HOSTAPD_BIN="${HOSTAPD_WEP_BIN:-/usr/local/sbin/hostapd-wep}"
+  cat > "$HOSTAPD_CONF" <<EOF
 interface=$WIFI_IF
 driver=nl80211
 ssid=$HOTSSID
@@ -155,12 +185,12 @@ fi
 # back to TKIP which the rt73 key table accepts reliably.
 AP_UP=""
 for _try in 1 2 3 4; do
-  $HOSTAPD_BIN /etc/hostapd/hostapd.conf -B || true
+  $HOSTAPD_BIN "$HOSTAPD_CONF" -B || true
   sleep 1
   if iw dev "$WIFI_IF" info 2>/dev/null | grep -q 'type AP'; then AP_UP=1; break; fi
   pkill -x "$(basename "$HOSTAPD_BIN")" 2>/dev/null || true
   if [ "$_try" -eq 2 ] && [ "$MODE" = "wpa2" ]; then
-    sed -i 's/^rsn_pairwise=CCMP/rsn_pairwise=TKIP/' /etc/hostapd/hostapd.conf
+    sed -i 's/^rsn_pairwise=CCMP/rsn_pairwise=TKIP/' "$HOSTAPD_CONF"
     echo "CCMP key install rejected; retrying with TKIP"
   fi
   sleep 2
@@ -169,13 +199,14 @@ if [ -z "$AP_UP" ]; then
   echo "hostapd could not enable AP mode on $WIFI_IF"
   exit 1
 fi
-pkill dnsmasq 2>/dev/null || true
-cat > /etc/dnsmasq.conf <<EOF
+pkill -x dnsmasq 2>/dev/null || true
+# dhcp-option 6 = DNS: WSL2 host proxy resolves via Windows DNS
+cat > "$DNSMASQ_CONF" <<EOF
 port=0
 interface=$WIFI_IF
 bind-interfaces
 dhcp-range=192.168.50.10,192.168.50.200,12h
-dhcp-option=6,10.255.255.254  # WSL2 host DNS proxy - resolves via Windows DNS
+dhcp-option=6,10.255.255.254
 EOF
 dnsmasq
 
@@ -191,7 +222,7 @@ $IPT -C FORWARD -i "$UPLINK_IF" -o "$WIFI_IF" -m state --state RELATED,ESTABLISH
 echo "WiFi started: $HOTSSID"
 case "$MODE" in
   open) echo "Mode: Open AP" ;;
-  wpa2) grep -q 'rsn_pairwise=TKIP' /etc/hostapd/hostapd.conf \
+  wpa2) grep -q 'rsn_pairwise=TKIP' "$HOSTAPD_CONF" \
           && echo "Mode: WPA2-PSK (TKIP fallback - rt73usb rejected CCMP key)" \
           || echo "Mode: WPA2-PSK (CCMP)" ;;
   *) echo "Mode: WEP key $HOTPASS" ;;

@@ -1,0 +1,5 @@
+#!/bin/sh
+# -C returns "rule missing" so the script exercises the -A append path
+[ "$2" = "-C" ] && exit 1
+echo "$@" >> "$STUB_STATE/iptables.log"
+exit 0

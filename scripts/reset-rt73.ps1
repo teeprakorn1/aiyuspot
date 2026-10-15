@@ -28,7 +28,7 @@ Write-Host '[1/5] Detaching and unbinding...' -ForegroundColor Yellow
 & $usbipd unbind --hardware-id 148f:2573 | Out-Null
 
 Write-Host '[2/5] Removing device node...' -ForegroundColor Yellow
-Get-PnpDevice | Where-Object { $_.InstanceId -match 'VID_148F' } | ForEach-Object {
+Get-PnpDevice | Where-Object { $_.InstanceId -match 'VID_148F&PID_2573' } | ForEach-Object {
     pnputil /remove-device $_.InstanceId | Out-Null
 }
 
@@ -49,7 +49,7 @@ pnputil /scan-devices | Out-Null
 Start-Sleep -Seconds 4
 
 Write-Host ''
-$dev = Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match 'VID_148F' }
+$dev = Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match 'VID_148F&PID_2573' }
 if ($dev) {
     Write-Host "Adapter re-detected: $($dev.FriendlyName) [$($dev.Status)]" -ForegroundColor Green
     if ($dev.Status -eq 'Error') {
@@ -59,4 +59,4 @@ if ($dev) {
     Write-Host 'Adapter not on the bus - unplug and replug the RT73 now.' -ForegroundColor Yellow
 }
 Write-Host ''
-Write-Host 'Reset complete. Run Start WPA2 AP to test.' -ForegroundColor Cyan
+Write-Host 'Reset complete. Replug the RT73, then start the hotspot from the menu.' -ForegroundColor Cyan

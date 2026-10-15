@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://github.com/teeprakorn1/aiyuspot"><img src="https://img.shields.io/badge/platform-Windows%20%2B%20WSL2-blue?style=for-the-badge" alt="Platform"></a>
-  <a href="https://github.com/teeprakorn1/aiyuspot"><img src="https://img.shields.io/badge/version-v0.1.1-orange?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/teeprakorn1/aiyuspot"><img src="https://img.shields.io/badge/version-v0.2.0-orange?style=for-the-badge" alt="Version"></a>
 </p>
 
 ---
@@ -95,7 +95,7 @@ Ensure you have WSL2 with a `kali-linux` distribution and [usbipd-win](https://g
 * 📖 **Setup Guides:** [docs/prerequisites.md](docs/prerequisites.md) · [docs/kernel-build.md](docs/kernel-build.md) · [CHANGELOG.md](CHANGELOG.md)
 
 ### 2. Launch the Hotspot
-Run `wifi-control.bat` (it will automatically self-elevate via UAC to manage `usbipd bind`). Select **Start WPA2 AP** from the interactive menu, or launch it directly via CLI:
+Run `wifi-control.bat` (it will automatically self-elevate via UAC to manage `usbipd bind`). Select **Start hotspot → WPA2-PSK (recommended)** from the interactive menu, or launch it directly via CLI:
 ```bat
 wifi-control.bat wpa2 MyNet MyPass123
 ```
@@ -111,14 +111,14 @@ Join the newly broadcast SSID from your client devices. They will automatically 
 
 ```bat
 wifi-control.bat                        :: Launch interactive arrow-key menu
-wifi-control.bat default                :: Start WEP AP (SSID: aiyuspot / Key: aiyu1)
-wifi-control.bat open                   :: Start Open AP (SSID: aiyuspot)
+wifi-control.bat default                :: Start WPA2 AP (SSID: aiyuspot / Pass: aiyuspot)
+wifi-control.bat open [MyNet]           :: Start Open AP (unencrypted)
 wifi-control.bat wep MyNet abcde        :: Start WEP AP (Key must be 5 or 13 ASCII chars)
 wifi-control.bat wpa2 MyNet MyPass123   :: Start WPA2-PSK AP (Passphrase >= 8 chars)
 wifi-control.bat stop                   :: Stop AP, detach USB, and terminate Kali WSL
 wifi-control.bat check                  :: Run adapter & driver health report
 wifi-control.bat driver                 :: Build and install AIC8800 driver in Kali (TX1U)
-wifi-control.bat kernel                 :: Build and install custom WSL2 kernel with rt73usb (RT73)
+wifi-control.bat kernel                 :: Build custom WSL2 kernel (RT73 driver, TX1U headers)
 wifi-control.bat reset                  :: Execute destructive PnP recovery (see warning)
 ```
 
@@ -151,6 +151,11 @@ wifi-control.bat reset                  :: Execute destructive PnP recovery (see
 | **TX1U shows a CD-ROM / access-denied dialog** | Normal — that's its storage-mode personality (`a69c:5721`). Click **Cancel**; the launcher mode-switches it automatically. |
 | **`usb_modeswitch: No devices in default mode found`** or `lsusb` hangs in Kali | A stale ghost USB device is wedging the stack. Run `wifi-control.bat stop`, then `usbipd detach --all`, then retry. (v0.1.1+ auto-`rmmod`s stale modules before attach.) |
 | **`No devices found with hardware-id 3625:0110`** | The mode-switch didn't take — unplug and replug the TX1U, then start again. |
+| **`usbipd-win not found` / `usbipd` errors** | Install it from [dorssel/usbipd-win releases](https://github.com/dorssel/usbipd-win/releases) — the launcher checks for it before touching hardware. |
+| **`WSL distro 'kali-linux' not found`** | Run `wsl --install -d kali-linux` — the distro name must be exactly `kali-linux` (or edit `DISTRO=` in `wifi-control.bat`). |
+| **`'git' is not recognized`** | Install [Git for Windows](https://git-scm.com/download/win), or download the repo ZIP instead — scripts don't need git to run. |
+| **`Kernel build tree missing`** during `driver` | `aic8800_fdrv` builds against `/lib/modules/$(uname -r)/build` — run `wifi-control.bat kernel` once (it installs the build tree the TX1U driver needs). |
+| **`firmware: failed to load rt73.bin`** | The launcher stages `rt73.bin` into the WSL init namespace and disables the udev abort-stub automatically. If it persists, check `dmesg` for `fwserve` activity and see [fwserve/README.md](fwserve/README.md). |
 
 ---
 
@@ -160,7 +165,7 @@ wifi-control.bat reset                  :: Execute destructive PnP recovery (see
 ├── SETUP.md                 # End-to-end installation guide
 ├── CHANGELOG.md             # Release history (Keep a Changelog)
 ├── wifi-control.bat         # Main entry point — interactive menu & CLI (portable)
-├── wifi-menu.ps1            # PowerShell arrow-key menu interface (v0.1.1)
+├── wifi-menu.ps1            # PowerShell arrow-key menu interface (v0.2.0)
 ├── scripts/                 # Windows-side utilities
 │   ├── check-adapters.ps1   # Adapter and driver health diagnostic script
 │   └── reset-rt73.ps1       # Stuck-PnP recovery utility (SYSTEM registry purge)

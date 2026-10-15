@@ -1,0 +1,7 @@
+#!/bin/sh
+# Fake lsusb: STUB_USB=rt73|tx1u|none
+case "${STUB_USB:-rt73}" in
+  rt73) echo "Bus 001 Device 002: ID 148f:2573 Ralink Technology, Corp. RT2501/RT2573";;
+  tx1u) echo "Bus 001 Device 003: ID 3625:0110 AICSemi AIC8800DC";;
+esac
+exit 0

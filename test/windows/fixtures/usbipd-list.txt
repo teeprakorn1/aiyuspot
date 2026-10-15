@@ -1,0 +1,7 @@
+Connected:
+BUSID  VID:PID    DEVICE                                                        STATE
+1-5    148f:2573  54M.USB.......                                                Attached
+2-1    046d:c52b  USB Input Device                                              Not shared
+
+Persisted:
+GUID      DEVICE

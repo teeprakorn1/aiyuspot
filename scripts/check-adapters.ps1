@@ -11,12 +11,12 @@
 .NOTES
     Part of: https://github.com/teeprakorn1/aiyuspot
 #>
-$Usbipd = 'C:\Program Files\usbipd-win\usbipd.exe'
+$Usbipd = if ($env:AIYUSPOT_USBIPD) { $env:AIYUSPOT_USBIPD } else { 'C:\Program Files\usbipd-win\usbipd.exe' }
 $Distro = 'kali-linux'
 
 $profiles = @{
     '148f:2573' = @{ Name = 'Ralink RT73 USB WiFi'; Module = 'rt73usb'; Note = 'AP ready (WEP/open/WPA2)' }
-    '3625:0110' = @{ Name = 'TP-Link Archer TX1U Nano (AIC8800)'; Module = 'aic8800_fdrv'; Note = 'WiFi 6 - client/monitor (AP experimental)' }
+    '3625:0110' = @{ Name = 'TP-Link Archer TX1U Nano (AIC8800)'; Module = 'aic8800_fdrv'; Note = 'WiFi 6 - AP verified (all modes)' }
     'a69c:5721' = @{ Name = 'TP-Link TX1U storage mode'; Module = '(eject -> 3625:0110)'; Note = 'auto-switch via udev/usb_modeswitch' }
 }
 
@@ -29,7 +29,7 @@ $supported = @()
 foreach ($hwid in $profiles.Keys) {
     $line = $list | Where-Object { $_ -match [regex]::Escape($hwid) } | Select-Object -First 1
     if ($line) {
-        $busid = ($line -split '\s+')[0]
+        $busid = ($line.Trim() -split '\s+')[0]
         $state = 'Present'
         if ($line -match 'Attached') { $state = 'Attached to WSL' }
         elseif ($line -match 'Shared') { $state = 'Shared (bound)' }

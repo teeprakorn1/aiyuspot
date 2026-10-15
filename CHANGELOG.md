@@ -4,6 +4,38 @@ All notable changes to **aiyuspot** are documented here. This project follows [K
 
 ---
 
+## [0.2.0] — Unreleased
+
+### 🎨 UX overhaul — Launcher that punished mistakes instead of guiding
+
+UX audit + testability review found the launcher actively worked against the user: `default` started a WEP AP (weakest mode, public key), `reset` wiped registry state with zero confirmation, missing prerequisites were misreported as missing hardware, invalid modes silently became WEP, and every failure exited 0 so nothing downstream could tell success from failure. This release makes the tool fail loudly, safely, and always with a next step.
+
+### 🆕 Added
+
+- **Grouped two-level menu** — `wifi-menu.ps1` rebuilt around 5 categories (Start hotspot / Tools / Setup / Reset / Exit) with per-item descriptions on the selected row, an action loop that returns to the menu after each run, a real cancel (`Enter = run, Esc/Backspace = back`), cursor restore on exit, and number-key shortcuts
+- **Preflight checks** — verifies `usbipd.exe` and the `kali-linux` distro exist before touching hardware; reports the actual fix instead of "No supported WiFi adapter found"
+- **Key validation before work starts** — WEP 5/13 chars, WPA2 8–63, re-prompted in the menu and fail-fast `exit 2` in the CLI; `help`/`/?` verb; `open SSID` argument now works
+- **Destructive `reset` gate** — prints what it does (SYSTEM registry purge + wipes *all* usbipd bindings, RT73-only) and requires typing `YES`
+- **RT73 initns firmware staging** — `rt73.bin` staged into the init namespace with the abort-stub disabled, same as TX1U (fresh machines could silently fail before)
+
+### 🔧 Changed
+
+- **`default` is now WPA2-PSK** (was WEP); omitted `wep`/`wpa2` keys warn about the public default instead of silently using it
+- **Real exit codes + no `pause` in CLI mode** — attach/hotspot/driver/kernel failures return nonzero, attach failures abort instead of cascading, and every failure prints a next step
+- **`kali-wsl-hotspot.sh` hardening** — mode whitelist, per-mode key defaults, byte-accurate lengths, SSID injection rejection, reliable `iw list` AP parsing, env-overridable conf paths
+- **`fwserve.c`** — source-open failure no longer commits an empty firmware blob; writes `loading=-1` so the kernel aborts cleanly
+- **`reset-rt73.ps1`** narrowed to `VID_148F&PID_2573`; **`install-aic8800.sh`** gained `depmod -a`; **`install-rt73.sh`** reports `git pull` failure loudly before building stale
+- **Docs** — SETUP clone moved to Step 0 (later steps referenced files that didn't exist yet), TX1U kernel-tree requirement fixed, VID:PID "which adapter" gate, README troubleshooting rows, stale "experimental" claims removed
+- **`.gitattributes`** — pins `*.sh`/`*.c` to LF (autocrlf checkouts would silently break every WSL script)
+
+### 🧪 Tests
+
+- **`test/` suite added** — batch harness (exit codes/stdout), Pester (`usbipd` fixture parsing, menu tree, validators), stub-PATH bash harness driving the full hotspot script incl. TKIP fallback, and a C unit test for `fwserve`; GitHub Actions runs Windows + Linux jobs on every push
+
+Hardware/RF paths (usbipd attach, modeswitch, AP on-air, client traffic) remain manual verification — the suite asserts script logic, not radio behaviour.
+
+---
+
 ## [0.1.1] — 2026-10-15
 
 ### 🎯 Fix — TX1U firmware loading under WSL2 (verified end-to-end)
@@ -89,5 +121,6 @@ First public release. **aiyuspot** turns a USB Wi-Fi adapter passed through to K
 - `wslpath` round-trip — `D:\Teepakorn-54850\non-work\aiyuspot` → `/mnt/d/Teepakorn-54850/non-work/aiyuspot`
 - GitHub anchor slugs verified for emoji/VS16 headings across README, SETUP.md, and docs
 
+[0.2.0]: https://github.com/teeprakorn1/aiyuspot/releases/tag/v0.2.0
 [0.1.1]: https://github.com/teeprakorn1/aiyuspot/releases/tag/v0.1.1
 [0.1.0]: https://github.com/teeprakorn1/aiyuspot/releases/tag/v0.1.0

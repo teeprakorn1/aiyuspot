@@ -8,13 +8,29 @@ This guide walks you through the complete installation process — from a stock 
 
 | Step | Component | Environment | Required For |
 | :---: | :--- | :---: | :--- |
+| **0** | [Get this repository](#0%EF%B8%8F⃣-get-this-repository) | 🪟 Windows | Everyone — **do this first** |
 | **1** | [WSL2 + Kali Linux](#1%EF%B8%8F⃣-install-wsl2--kali-linux) | 🪟 Windows | All adapters |
 | **2** | [usbipd-win](#2%EF%B8%8F⃣-install-usbipd-win) | 🪟 Windows | All adapters |
-| **3** | [Custom WSL2 Kernel](#3%EF%B8%8F⃣-build-a-custom-wsl2-kernel-rt73-only) | 🐉 Kali / 🪟 Windows | **Ralink RT73 only** |
+| **3** | [Custom WSL2 Kernel](#3%EF%B8%8F⃣-build-a-custom-wsl2-kernel) | 🐉 Kali / 🪟 Windows | **RT73** (driver) + **TX1U** (build headers) |
 | **4** | [Core Packages & `fwserve`](#4%EF%B8%8F⃣-install-kali-packages--fwserve) | 🐉 Kali | All adapters |
 | **5** | [`hostapd-wep` Binary](#5%EF%B8%8F⃣-build-hostapd-wep-wep--open-modes-only) | 🐉 Kali | **WEP / Open modes only** |
 | **6** | [AIC8800 Driver](#6%EF%B8%8F⃣-install-tx1u-nano-driver-tx1u-only) | 🪟 Windows / 🐉 Kali | **TP-Link TX1U Nano only** |
-| **7** | [Clone & Launch](#7%EF%B8%8F⃣-clone--launch) | 🪟 Windows | Everyone |
+| **7** | [Launch](#7%EF%B8%8F⃣-launch) | 🪟 Windows | Everyone |
+
+---
+
+## 0️⃣ Get this repository
+
+Everything below runs from the repo root — get it first:
+
+```bat
+git clone https://github.com/teeprakorn1/aiyuspot.git
+cd aiyuspot
+```
+
+> **ℹ️ No git on Windows?** Install [Git for Windows](https://git-scm.com/download/win), or download the repo ZIP from GitHub and extract it instead — the scripts don't need git to run.
+
+> **🔍 Which adapter do I have?** Plug it in, install usbipd-win (Step 2), then run `usbipd list`: `148f:2573` = RT73, `a69c:5721`/`3625:0110` = TX1U.
 
 ---
 
@@ -45,7 +61,7 @@ This installs both the `usbipd` background service and the `VBoxUSBMon` USB filt
 
 ---
 
-## 3️⃣ Build a Custom WSL2 Kernel *(RT73 Only)*
+## 3️⃣ Build a Custom WSL2 Kernel
 
 The stock Microsoft WSL2 kernel does not include the `rt73usb` driver module. You must compile a custom kernel and point `%USERPROFILE%\.wslconfig` to the resulting image.
 
@@ -63,7 +79,7 @@ and run `wsl --shutdown` once.
 
 📖 **Manual step-by-step:** [docs/kernel-build.md](docs/kernel-build.md)
 
-> **💡 Using the TP-Link TX1U Nano?** You do **not** need a custom kernel image — the TX1U's driver (`aic8800_fdrv`) builds out-of-tree in Step 6. However, ensure your kernel build headers remain installed at `/lib/modules/$(uname -r)/build` so the module can compile.
+> **💡 Using the TP-Link TX1U Nano?** You don't strictly need the custom kernel *image* — but `aic8800_fdrv` (Step 6) builds out-of-tree against `/lib/modules/$(uname -r)/build`, which the stock WSL2 kernel does **not** ship. Running `wifi-control.bat kernel` installs that build tree, so **run this step for TX1U too** — pointing `.wslconfig` at the new kernel is optional for TX1U.
 
 ---
 
@@ -82,10 +98,13 @@ sudo apt install -y \
   firmware-misc-nonfree \
   build-essential
 
-# Compile and install the sysfs firmware helper (run from the repo root)
+# Compile and install the sysfs firmware helper (run from the repo root
+# inside Kali — the Windows path D:\...\aiyuspot is /mnt/d/.../aiyuspot)
 sudo gcc -O2 -o /usr/local/bin/fwserve fwserve/fwserve.c
 sudo chmod 755 /usr/local/bin/fwserve
 ```
+
+> **📡 RT73 firmware note:** `rt73.bin` (from `firmware-misc-nonfree`) must also exist in the WSL2 **init mount namespace**. The launcher stages it automatically on every run — no manual step needed. Details: [docs/prerequisites.md](docs/prerequisites.md).
 
 ---
 
@@ -127,16 +146,14 @@ At launch time, `wifi-control.bat` additionally stages the AIC8800 firmware blob
 
 ---
 
-## 7️⃣ Clone & Launch
+## 7️⃣ Launch
 
-1. On **Windows**, clone the repository and launch the interactive control menu:
+1. From the repo root on **Windows**, launch the interactive control menu:
    ```bat
-   git clone https://github.com/teeprakorn1/aiyuspot.git
-   cd aiyuspot
    wifi-control.bat
    ```
 
-2. Select **Start WPA2 AP** from the arrow-key menu (or run `wifi-control.bat wpa2 MyNet MyPass123`).
+2. Select **Start hotspot → WPA2-PSK (recommended)** from the menu (or run `wifi-control.bat wpa2 MyNet MyPass123`).
 3. Approve the Windows **UAC prompt** (required for `usbipd bind`).
 4. Connect your phones or laptops to the Wi-Fi network!
 

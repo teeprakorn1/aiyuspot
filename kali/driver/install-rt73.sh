@@ -24,7 +24,7 @@ apt-get update -qq
 apt-get install -y -qq git build-essential flex bison libssl-dev libelf-dev bc dwarves libncurses-dev
 
 if [ -d "$SRC/.git" ]; then
-    git -C "$SRC" pull --ff-only || echo "pull skipped; using existing tree"
+    git -C "$SRC" pull --ff-only || echo "WARNING: git pull failed - building from the existing (possibly stale) tree"
 else
     git clone --depth 1 "$REPO" "$SRC"
 fi

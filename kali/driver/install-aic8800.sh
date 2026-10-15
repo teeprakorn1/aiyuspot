@@ -67,6 +67,7 @@ cd "$SRC/drivers/aic8800"
 make clean >/dev/null 2>&1 || true
 make
 make install
+depmod -a
 
 cp "$SRC/aic.rules" /lib/udev/rules.d/
 rm -rf /lib/firmware/aic8800DC

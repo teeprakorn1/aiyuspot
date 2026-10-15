@@ -1,0 +1,37 @@
+name: tests
+
+on: [push, pull_request]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Batch harness
+        shell: cmd
+        run: test\windows\run-tests.bat
+      - name: Pester (install if needed)
+        shell: powershell
+        run: |
+          if (-not (Get-Module -ListAvailable Pester | Where-Object Version -ge '5.0')) {
+            Install-Module Pester -Scope CurrentUser -Force -SkipPublisherCheck -MinimumVersion 5.0
+          }
+          Invoke-Pester ./test/windows/ -Output Normal
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: ShellCheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+      - name: Lint
+        run: bash test/linux/lint.sh
+      - name: Hotspot stub tests
+        run: sudo bash test/linux/hotspot.tests.sh
+      - name: fwserve C tests
+        run: |
+          mkdir -p /tmp/fwtest_sysfw /tmp/fwtest_libfw
+          gcc -Wall -Wextra -DFWSERVE_NO_MAIN \
+            -DSYSFW='"/tmp/fwtest_sysfw"' -DLIBFW='"/tmp/fwtest_libfw"' \
+            -o /tmp/test_fwserve test/c/test_fwserve.c
+          /tmp/test_fwserve

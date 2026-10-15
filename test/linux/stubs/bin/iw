@@ -1,0 +1,17 @@
+#!/bin/sh
+# STUB_HOSTAPD_FAILS=N -> 'type managed' until ap_tries > N, then 'type AP'
+if [ "$1" = "list" ]; then
+  printf '\tSupported interface modes:\n\t\t * IBSS\n\t\t * managed\n\t\t * AP\n'
+  printf '\tDevice supports AP-side u-APSD.\n'
+  exit 0
+fi
+if [ "$1" = "dev" ] && [ "$3" = "info" ]; then
+  n=$(cat "$STUB_STATE/ap_tries" 2>/dev/null || echo 0)
+  if [ "$n" -gt "${STUB_HOSTAPD_FAILS:-0}" ]; then
+    echo "        type AP"
+  else
+    echo "        type managed"
+  fi
+  exit 0
+fi
+exit 0

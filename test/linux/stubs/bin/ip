@@ -1,0 +1,7 @@
+#!/bin/sh
+if [ "$1" = "-br" ] && [ "$2" = "link" ]; then
+  echo "lo               UNKNOWN"
+  echo "eth0             UP"
+  echo "wlan0            DOWN"
+fi
+exit 0

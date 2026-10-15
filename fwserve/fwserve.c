@@ -24,8 +24,12 @@
 #include <unistd.h>
 #include <limits.h>
 
+#ifndef SYSFW
 #define SYSFW "/sys/class/firmware"
+#endif
+#ifndef LIBFW
 #define LIBFW "/lib/firmware"
+#endif
 
 /* Locate a firmware file: /lib/firmware/<name>, else search one level
  * of vendor subdirs (e.g. aic8800DC/) for the basename. */
@@ -62,6 +66,7 @@ static void serve(const char *reqdir, const char *name) {
     if (!f) return;
     fputs("1", f); fclose(f);
 
+    int ok = 0;
     f = fopen(data, "w");
     if (f) {
         FILE *src = fopen(srcp, "rb");
@@ -71,12 +76,15 @@ static void serve(const char *reqdir, const char *name) {
             while ((n = fread(buf, 1, sizeof buf, src)) > 0)
                 fwrite(buf, 1, n, f);
             fclose(src);
+            ok = 1;
         }
         fclose(f);
     }
 
+    /* On any failure write -1 to abort the request - otherwise the
+     * kernel would commit an empty blob and the probe fails oddly. */
     f = fopen(loading, "w");
-    if (f) { fputs("0", f); fclose(f); }
+    if (f) { fputs(ok ? "0" : "-1", f); fclose(f); }
 }
 
 /* A request dir contains a "loading" node. */
@@ -107,6 +115,7 @@ static void scan(const char *path, const char *rel) {
     closedir(d);
 }
 
+#ifndef FWSERVE_NO_MAIN
 int main(void) {
     for (;;) {
         scan(SYSFW, "");
@@ -114,3 +123,4 @@ int main(void) {
     }
     return 0;
 }
+#endif /* FWSERVE_NO_MAIN */
