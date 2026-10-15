@@ -64,18 +64,27 @@ Modern Debian and Kali distributions compile `hostapd` without legacy WEP suppor
 
 ---
 
-### 2.3 Compiling `fwserve` *(Required for Ralink RT73)*
+### 2.3 Firmware & `fwserve`
 
-The WSL2 kernel never forwards firmware requests to userspace, so `modprobe rt73usb` cannot fetch `rt73.bin` even if a `udev` daemon were running. 
+Under WSL2, `request_firmware()` reads `/lib/firmware` in the **VM init mount namespace** — not the distro's filesystem — and the init-namespace `systemd-udevd` aborts pending sysfs requests within ~1 ms (stub rule `50-firmware.rules`).
 
-The included `fwserve` helper watches the kernel's `sysfs` fallback directory and feeds `/lib/firmware/rt73.bin` to the kernel manually. Compile and install it inside Kali from the repository root:
+The launcher handles this automatically:
+
+* **TX1U** — `wifi-control.bat` stages all AIC8800 blobs into the initns `/lib/firmware` and disables the udev stub on every start (idempotent).
+* **RT73** — `rt73.bin` must be present in the initns `/lib/firmware` once. Stage it from Windows:
+
+  ```bat
+  wsl.exe -d kali-linux -u root -- sh -c "cat /lib/firmware/rt73.bin" | wsl.exe --system -u root -e sh -c "P=$(pidof systemd-udevd | cut -d' ' -f1); nsenter -m -t $P sh -c 'cat > /lib/firmware/rt73.bin'"
+  ```
+
+The `fwserve` helper remains as a fallback for pending sysfs firmware requests (works once the udev stub is disabled). Compile it inside Kali from the repository root:
 
 ```bash
 sudo gcc -O2 -o /usr/local/bin/fwserve fwserve/fwserve.c
 sudo chmod 755 /usr/local/bin/fwserve
 ```
 
-*(Note: `wifi-control.bat` automatically launches `fwserve` in the background prior to loading `rt73usb` — see [`fwserve/README.md`](../fwserve/README.md) for technical details).*
+*(See [`fwserve/README.md`](../fwserve/README.md) for the full technical breakdown.)*
 
 ---
 

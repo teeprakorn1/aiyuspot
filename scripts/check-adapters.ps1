@@ -72,7 +72,7 @@ foreach ($svc in 'usbipd', 'VBoxUSBMon') {
 
 Write-Host ''
 Write-Host '-- Kali WSL state --' -ForegroundColor Yellow
-$wslOut = wsl.exe -d $Distro -u root -- sh -c "echo USB:; lsusb 2>/dev/null | grep -iE '148f|3625|a69c'; echo MODULES:; lsmod | grep -E 'rt73usb|aic8800'; echo IFACE:; ip -br link 2>/dev/null | awk '/^[wW]l/ {print}'; echo AP:; pgrep -x hostapd >/dev/null && echo hostapd running || echo hostapd stopped; pgrep -x dnsmasq >/dev/null && echo dnsmasq running || echo dnsmasq stopped" 2>$null
+$wslOut = wsl.exe -d $Distro -u root -- sh -c "echo USB:; lsusb 2>/dev/null | grep -iE '148f|3625|a69c'; echo MODULES:; lsmod | grep -E 'rt73usb|aic'; echo IFACE:; ip -br link 2>/dev/null | awk '/^[wW]l/ {print}'; echo AP:; pgrep -x hostapd >/dev/null && echo hostapd running || echo hostapd stopped; pgrep -x dnsmasq >/dev/null && echo dnsmasq running || echo dnsmasq stopped" 2>$null
 if ($LASTEXITCODE -eq 0 -and $wslOut) {
     $wslOut | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
 } else {

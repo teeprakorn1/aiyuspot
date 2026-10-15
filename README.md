@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://github.com/teeprakorn1/aiyuspot"><img src="https://img.shields.io/badge/platform-Windows%20%2B%20WSL2-blue?style=for-the-badge" alt="Platform"></a>
-  <a href="https://github.com/teeprakorn1/aiyuspot"><img src="https://img.shields.io/badge/version-v0.1-orange?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/teeprakorn1/aiyuspot"><img src="https://img.shields.io/badge/version-v0.1.1-orange?style=for-the-badge" alt="Version"></a>
 </p>
 
 ---
@@ -79,8 +79,8 @@
 
 | Adapter | USB ID | Driver | Status |
 | :--- | :---: | :---: | :--- |
-| **Ralink RT73** *(54M USB)* | `148f:2573` | `rt73usb` *(custom kernel)* | ✅ **Verified** — AP works (WPA2 / WEP / Open) |
-| **TP-Link Archer TX1U Nano** *(AX300, Wi-Fi 6)* | `3625:0110` <br>*(Storage: `a69c:5721`)* | `aic8800_fdrv` | 🟡 **Builds & loads** — AP mode unverified |
+| **Ralink RT73** *(54M USB)* | `148f:2573` | `rt73usb` *(custom kernel)* | ✅ **Verified** — all modes client-tested (WPA2 auto-falls back to TKIP) |
+| **TP-Link Archer TX1U Nano** *(AX300, Wi-Fi 6)* | `3625:0110` <br>*(Storage: `a69c:5721`)* | `aic8800_fdrv` | ✅ **Verified** — AP works (WPA2 / WEP / Open) |
 
 > ➕ **Adding another adapter:** Simply add its `VID:PID` to `wifi-control.bat` and `scripts/check-adapters.ps1`. See [docs/adapters.md](docs/adapters.md) for detailed instructions.
 
@@ -118,6 +118,7 @@ wifi-control.bat wpa2 MyNet MyPass123   :: Start WPA2-PSK AP (Passphrase >= 8 ch
 wifi-control.bat stop                   :: Stop AP, detach USB, and terminate Kali WSL
 wifi-control.bat check                  :: Run adapter & driver health report
 wifi-control.bat driver                 :: Build and install AIC8800 driver in Kali (TX1U)
+wifi-control.bat kernel                 :: Build and install custom WSL2 kernel with rt73usb (RT73)
 wifi-control.bat reset                  :: Execute destructive PnP recovery (see warning)
 ```
 
@@ -134,6 +135,7 @@ wifi-control.bat reset                  :: Execute destructive PnP recovery (see
 * **Change Default Credentials:** The default SSID (`aiyuspot`), WEP key (`aiyu1`), and WPA2 passphrase (`aiyuspot`) are publicly documented in this repository.
 * **Administrator Privileges:** The launcher requests UAC administrator elevation on Windows to execute `usbipd bind` operations.
 * **`reset` is Destructive:** The `reset` command purges device registry keys under `HKLM\SYSTEM\CurrentControlSet\Enum` via a temporary `SYSTEM`-level scheduled task and clears `usbipd` state records. Only run this when an adapter is severely stuck in a broken Windows PnP state. Review the header in `scripts/reset-rt73.ps1` for full details.
+* **Modifies the WSL VM init namespace:** For the TX1U, the launcher stages AIC8800 firmware into the VM init `/lib/firmware` and disables a firmware-abort udev stub (`50-firmware.rules`) there via `wsl --system` + `nsenter`. This affects all WSL2 distros on the machine and persists across restarts.
 * **Authorized Networks Only:** Only operate this tool on networks you own or have explicit permission to administer, as it bridges external Wi-Fi clients directly onto your host machine's network uplink.
 
 ---
@@ -146,6 +148,9 @@ wifi-control.bat reset                  :: Execute destructive PnP recovery (see
 | **`No supported adapter found`** | Run `wifi-control.bat check` and verify that the device is detected under `usbipd list`. |
 | **`rfkill` warning** inside WSL | Harmless WSL2 virtualized hardware limitation — safe to ignore. |
 | **Kernel module missing** after WSL/kernel update | Re-run `wifi-control.bat driver` (for TX1U) or rebuild/reinstall the `rt73usb` kernel modules (for RT73). |
+| **TX1U shows a CD-ROM / access-denied dialog** | Normal — that's its storage-mode personality (`a69c:5721`). Click **Cancel**; the launcher mode-switches it automatically. |
+| **`usb_modeswitch: No devices in default mode found`** or `lsusb` hangs in Kali | A stale ghost USB device is wedging the stack. Run `wifi-control.bat stop`, then `usbipd detach --all`, then retry. (v0.1.1+ auto-`rmmod`s stale modules before attach.) |
+| **`No devices found with hardware-id 3625:0110`** | The mode-switch didn't take — unplug and replug the TX1U, then start again. |
 
 ---
 
@@ -155,13 +160,15 @@ wifi-control.bat reset                  :: Execute destructive PnP recovery (see
 ├── SETUP.md                 # End-to-end installation guide
 ├── CHANGELOG.md             # Release history (Keep a Changelog)
 ├── wifi-control.bat         # Main entry point — interactive menu & CLI (portable)
-├── wifi-menu.ps1            # PowerShell arrow-key menu interface (v0.1)
+├── wifi-menu.ps1            # PowerShell arrow-key menu interface (v0.1.1)
 ├── scripts/                 # Windows-side utilities
 │   ├── check-adapters.ps1   # Adapter and driver health diagnostic script
 │   └── reset-rt73.ps1       # Stuck-PnP recovery utility (SYSTEM registry purge)
 ├── kali/
 │   ├── kali-wsl-hotspot.sh  # Orchestrates hostapd, dnsmasq, and iptables NAT in Kali
-│   └── install-aic8800.sh   # Compiles aic8800_fdrv driver with patched VID:PID (TX1U)
+│   └── driver/
+│       ├── install-aic8800.sh  # Compiles aic8800_fdrv driver with patched VID:PID (TX1U)
+│       └── install-rt73.sh     # Builds custom WSL2 kernel with rt73usb (RT73)
 ├── fwserve/
 │   └── fwserve.c            # sysfs firmware fallback daemon (serves rt73.bin in WSL2)
 └── docs/
@@ -169,6 +176,7 @@ wifi-control.bat reset                  :: Execute destructive PnP recovery (see
     ├── prerequisites.md     # Windows host and Kali WSL2 setup instructions
     ├── kernel-build.md      # Guide for compiling a custom WSL2 kernel with rt73usb
     ├── adapters.md          # Hardware notes and guide for adding new VID:PIDs
+    ├── benchmarks.md        # Measured throughput/latency and how to reproduce
     └── images/
         └── e2e-architecture.jpg
 ```
@@ -178,7 +186,7 @@ wifi-control.bat reset                  :: Execute destructive PnP recovery (see
 ## 🤝 Contributing
 
 Issues and Pull Requests are welcome! We are especially looking for:
-* AP-mode test results and configuration tweaks for the **TP-Link Archer TX1U Nano**.
+* Open-mode test results for the **TP-Link Archer TX1U Nano** (WPA2 and WEP are verified).
 * Support and `VID:PID` additions for new USB Wi-Fi adapters (see [docs/adapters.md](docs/adapters.md)).
 
 ---

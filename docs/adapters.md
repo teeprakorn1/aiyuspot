@@ -8,8 +8,8 @@ This document outlines the hardware compatibility, driver requirements, and setu
 
 | USB ID (`VID:PID`) | Adapter | Linux Driver | AP Mode | Notes |
 | :---: | :--- | :---: | :---: | :--- |
-| `148f:2573` | **Ralink RT73** (54M USB) | `rt73usb` *(in-kernel)* | ✅ WPA2 / WEP / Open | Verified end-to-end |
-| `3625:0110` | **TP-Link Archer TX1U Nano** | `aic8800_fdrv` *(out-of-tree)* | 🟡 Unverified | Wi-Fi 6, FullMAC driver |
+| `148f:2573` | **Ralink RT73** (54M USB) | `rt73usb` *(in-kernel)* | ✅ WPA2 (TKIP) / WEP / Open | Verified end-to-end — real clients on all modes |
+| `3625:0110` | **TP-Link Archer TX1U Nano** | `aic8800_fdrv` *(out-of-tree)* | ✅ WPA2 / WEP / Open | Wi-Fi 6, FullMAC driver |
 | `a69c:5721` | **TX1U Storage / CD-ROM Mode** | — | — | Auto-ejects and re-enumerates as `3625:0110` |
 
 ---
@@ -18,24 +18,24 @@ This document outlines the hardware compatibility, driver requirements, and setu
 
 ### 1. Ralink RT73 (`148f:2573`) — ✅ Verified
 
-The Ralink RT73 is fully tested and supports WPA2, WEP, and Open AP modes reliably.
+The Ralink RT73 is fully tested and supports WEP and Open AP modes reliably. WPA2 works via an automatic **TKIP fallback** — `rt73usb`'s hardware crypto intermittently rejects CCMP key installation (`nl80211: key addition failed`), so the hotspot script retries with `rsn_pairwise=TKIP`. Clients still connect fine; TKIP is just older WPA2-era crypto (still better than WEP).
 
 * **Custom Kernel Required**: The stock Microsoft WSL2 kernel does not include the `rt73usb` module. You must compile a custom WSL2 kernel (see [kernel-build.md](kernel-build.md)).
 * **Proprietary Firmware**: Requires `rt73.bin` from the `linux-firmware` or `firmware-misc-nonfree` packages. *(Note: Do not commit this binary to the repository as it is proprietary).*
-* **WSL Firmware Workaround**: The WSL2 kernel never forwards firmware requests to userspace, so even a running `udev` daemon cannot serve them. [`fwserve`](../fwserve/README.md) works around this by feeding `rt73.bin` to the kernel via the sysfs fallback mechanism (`force_sysfs_fallback=1`).
+* **WSL Firmware Workaround**: `request_firmware()` reads `/lib/firmware` in the WSL2 VM **init mount namespace**, not the distro's — `rt73.bin` must be staged there (see [`fwserve/README.md`](../fwserve/README.md) for the `nsenter` mechanism and why the sysfs fallback needs the init-ns udev stub disabled).
 * **Windows PnP Recovery**: Driver conflicts on the Windows host (e.g., `VBoxUSB`, stale PnP states, or Device Manager **Code 19**) may occur after a reboot. Run `wifi-control.bat reset` to purge the stuck registry state.
 
 ---
 
-### 2. TP-Link Archer TX1U Nano (`3625:0110`) — 🟡 Prepared (Experimental)
+### 2. TP-Link Archer TX1U Nano (`3625:0110`) — ✅ Verified (WPA2)
 
-Driver compilation and module loading are automated, though full AP mode functionality remains under testing.
+Driver compilation, firmware staging, and AP bring-up are automated and verified end-to-end in WPA2-PSK mode.
 
-* **USB Mode-Switching**: Some hardware revisions initially enumerate as a virtual CD-ROM / mass-storage device (`a69c:5721`) containing Windows drivers. The bundled `aic.rules` udev rule ejects the storage volume so the adapter re-enumerates in Wi-Fi mode (`3625:0110`); inside WSL2 the launcher also calls `usb_modeswitch -v 0xa69c -p 0x5721 -K` explicitly in case no udev daemon is running.
-* **Out-of-Tree Driver**: Uses [`saish660/aic8800dc`](https://github.com/saish660/aic8800dc) with a custom two-line patch that registers `3625:0110` under the `AIC8800DW` chip family. Running `wifi-control.bat driver` (which executes `kali/install-aic8800.sh`) automatically patches, builds, and installs the module.
-* **Current Status**: 
-  * **Working**: Modules build cleanly and `modprobe aic8800_fdrv` loads successfully on Linux kernel `6.18`.
-  * **Unverified**: Access Point (AP) mode capability. Because this is a FullMAC driver, its `nl80211` AP support may have limitations. Community test reports and PRs are welcome!
+* **USB Mode-Switching**: Some hardware revisions initially enumerate as a virtual CD-ROM / mass-storage device (`a69c:5721`) containing Windows drivers. The launcher attaches the storage-mode device to WSL2, runs `usb_modeswitch -v 0xa69c -p 0x5721 -K` inside Kali to eject it, then **re-attaches the re-enumerated `3625:0110` device** — the original usbipd attach dies when the device resets. (`aic.rules` remains installed for reference, but explicit `usb_modeswitch` is the actual mechanism in WSL2.)
+* **Out-of-Tree Driver**: Uses [`saish660/aic8800dc`](https://github.com/saish660/aic8800dc) with a custom two-line patch that registers `3625:0110` under the `AIC8800DW` chip family. Running `wifi-control.bat driver` (which executes `kali/driver/install-aic8800.sh`) automatically patches, builds, and installs the module. At runtime the launcher loads `aic_load_fw` (firmware loader) first, then `aic8800_fdrv`.
+* **Dual-Adapter Selection**: When both the RT73 and TX1U are attached, `kali-wsl-hotspot.sh` picks the interface by its bound kernel driver and prefers `aic8800_fdrv` (TX1U) over `rt73usb` (RT73). To force the RT73, detach the TX1U from WSL first (`usbipd detach --hardware-id 3625:0110`).
+* **Firmware Loading**: The driver requests ~15 blobs (`fmacfw_*`, `fw_adid_*`, `fw_patch_table_*`, `aic_userconfig_*.txt`) by flat filename via `request_firmware()` — requires the module built with `CONFIG_USE_FW_REQUEST=y` (see `kali/driver/install-aic8800.sh`). The blobs must be visible in the WSL2 **init mount namespace** `/lib/firmware`; the launcher stages them automatically (`wsl --system` + `nsenter`) and disables the init-ns udev stub that otherwise aborts pending firmware requests in ~1 ms.
+* **Current Status**: **Verified** — driver probes, firmware downloads via initns staging, `iw list` advertises `AP`, hostapd reaches `AP-ENABLED` in **WPA2, WEP, and Open** modes, and real clients associated, received a `192.168.50.x` lease, and reached the Internet through NAT in all three modes.
 
 ---
 

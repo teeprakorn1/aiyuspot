@@ -48,6 +48,19 @@ if '0x3625' not in s:
     print('TX1U patch applied')
 else:
     print('TX1U patch already present')
+
+# Firmware must go through request_firmware(): the driver's default
+# filp_open() path fails under WSL2's probe context, while
+# request_firmware() is served by fwserve via the sysfs fallback.
+for mk in ('/usr/src/aic8800dc/drivers/aic8800/aic8800_fdrv/Makefile',
+           '/usr/src/aic8800dc/drivers/aic8800/aic_load_fw/Makefile'):
+    s = open(mk).read()
+    if 'CONFIG_USE_FW_REQUEST = n' in s:
+        open(mk, 'w').write(s.replace('CONFIG_USE_FW_REQUEST = n', 'CONFIG_USE_FW_REQUEST = y'))
+        print('CONFIG_USE_FW_REQUEST=y in', mk)
+    else:
+        assert 'CONFIG_USE_FW_REQUEST = y' in s, 'FW_REQUEST flag missing - upstream Makefile changed?'
+        print('CONFIG_USE_FW_REQUEST already set in', mk)
 PYEOF
 
 cd "$SRC/drivers/aic8800"

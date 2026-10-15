@@ -6,7 +6,7 @@
     wifi-control.bat command for confirmation, then invokes it.
     Custom WEP/WPA2 items prompt for SSID and key with project defaults.
 .NOTES
-    Version: 0.1
+    Version: 0.1.1
     Part of: https://github.com/teeprakorn1/aiyuspot
 #>
 $ErrorActionPreference = 'Stop'
@@ -17,6 +17,7 @@ $items = @(
     'Start Open AP',
     'Check adapters',
     'Install TX1U driver',
+    'Build RT73 kernel',
     'Stop WiFi',
     'Reset adapter state',
     'Exit'
@@ -28,6 +29,7 @@ $descriptions = @(
     'For temporary testing only',
     'Detect USB adapters, drivers and hotspot state',
     'Build AIC8800 driver for Archer TX1U Nano in Kali',
+    'Compile custom WSL2 kernel with rt73usb (long build)',
     'Stop services and terminate Kali WSL',
     'Fix stuck USB driver state after reboot',
     'Close the menu'
@@ -41,7 +43,7 @@ try {
         Clear-Host
         Write-Host '========================================' -ForegroundColor DarkCyan
         Write-Host '  aiyuspot - USB WiFi Hotspot' -ForegroundColor Yellow
-        Write-Host '  Version 0.1' -ForegroundColor DarkYellow
+        Write-Host '  Version 0.1.1' -ForegroundColor DarkYellow
         Write-Host '  Select an action for the wireless hotspot.' -ForegroundColor Gray
         Write-Host '========================================' -ForegroundColor DarkCyan
 
@@ -105,10 +107,14 @@ switch ($index) {
         $command = "$($batch) driver"
     }
     6 {
+        $arguments = @('kernel')
+        $command = "$($batch) kernel"
+    }
+    7 {
         $arguments = @('stop')
         $command = "$($batch) stop"
     }
-    7 {
+    8 {
         $arguments = @('reset')
         $command = "$($batch) reset"
     }

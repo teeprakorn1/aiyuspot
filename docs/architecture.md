@@ -54,7 +54,7 @@ The entire Access Point stack runs isolated inside Kali Linux — **Windows host
 | Sub-layer | Component | Role |
 | :--- | :--- | :--- |
 | **Driver** | `rt73usb` *(in-kernel)* / `aic8800_fdrv` *(out-of-tree)* | Binds to the attached USB device and exposes `wlan0` / `wlx*`. |
-| **Firmware** | `fwserve` + `sysfs` fallback | Feeds `/lib/firmware/rt73.bin` to the kernel (the WSL2 kernel never forwards firmware requests to userspace). |
+| **Firmware** | Init-ns `/lib/firmware` staging + `fwserve` fallback | Kernel `request_firmware` reads the **VM init mount namespace**, not the distro fs — the launcher stages blobs there via `wsl --system` + `nsenter` and disables the initns udev abort stub (`50-firmware.rules`). `fwserve` serves pending sysfs requests as a fallback. See [`fwserve/README.md`](../fwserve/README.md). |
 | **Access Point** | `hostapd` *(WPA2)* / `hostapd-wep` *(WEP/Open)* | Manages 802.11 beacons, authentication, and client associations. |
 | **Addressing** | `dnsmasq` | DHCP only (`port=0` — DNS disabled): leases `192.168.50.10–200`, gateway `192.168.50.1`, and pushes the WSL host DNS proxy via `dhcp-option`. |
 | **Forwarding** | `iptables-legacy` + `ip_forward` | Performs `MASQUERADE` (NAT) from `wlan0` out through `eth0`. |
@@ -79,7 +79,7 @@ Executed when launching or stopping the hotspot via `wifi-control.bat`:
 [Detect Adapter] ──► [Start VBoxUSBMon] ──► [usbipd bind] ──► [Clean Detach/Reset]
        │
        ▼
-[Attach to WSL2] ──► [Load Firmware + Driver] ──► [Start hostapd] ──► [Start dnsmasq + NAT]
+[Attach to WSL2] ──► [Stage FW → initns] ──► [Load Driver] ──► [Start hostapd] ──► [Start dnsmasq + NAT]
 ```
 * Running `wifi-control.bat stop` cleanly unwinds the Control Plane in reverse order.
 * Running `wifi-control.bat reset` forces a Layer-1 state repair when Windows PnP wedges the USB port.
@@ -101,5 +101,5 @@ Once the AP is active, client network packets follow this path:
 | :--- | :--- | :--- |
 | **L1 — Windows PnP** | Device Manager **Code 19** or `Device busy (exported)` after reboot | Run `wifi-control.bat reset`, then unplug and replug the USB adapter. |
 | **L2 — Transport** | Device shows as `Not shared` or `usbipd attach` fails | Run `wifi-control.bat check` to inspect state, then re-run to auto-rebind. |
-| **L3 — Driver / FW** | Kernel module loads, but no `wlan0` interface appears | **RT73:** Ensure `fwserve` + `rt73.bin` are installed.<br>**TX1U:** Run `wifi-control.bat driver` to rebuild the module. |
+| **L3 — Driver / FW** | Kernel module loads, but no `wlan0`/`wlx*` interface appears | Check `dmesg` for `Direct firmware load ... failed`. Firmware must be in the **init mount namespace** `/lib/firmware` (the launcher stages it automatically); `fwserve` covers the sysfs-fallback path once the initns udev stub is disabled.<br>**TX1U:** also re-run `wifi-control.bat driver` to rebuild the module. |
 | **L3/L4 — Routing** | `AP-ENABLED` shows up, but clients get no DHCP lease or internet | Re-run the hotspot start command and verify `eth0` has connectivity inside Kali. |

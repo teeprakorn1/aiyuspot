@@ -2,6 +2,8 @@
 
 The stock `Microsoft/standard` WSL2 kernel does not include the Ralink driver (`CONFIG_RT73USB`), which the RT73 adapter requires. This guide walks you through compiling and installing a custom WSL2 kernel with wireless module support.
 
+> **🚀 Automated:** `wifi-control.bat kernel` runs `kali/driver/install-rt73.sh` which performs this entire guide for you (deps → clone → config → build → `bzImage` to `C:\wsl\`). This page documents the manual path.
+
 > **ℹ️ Note:** A custom kernel image is **strictly required for the Ralink RT73**. The TP-Link Archer TX1U Nano uses an out-of-tree driver (`aic8800_fdrv`) built via `wifi-control.bat driver`, though it still requires the kernel headers/build tree prepared in Step 4.
 
 ---
@@ -38,15 +40,23 @@ Run the kernel configuration script to enable the necessary modules directly:
 
 ```bash
 ./scripts/config \
+  --enable WLAN \
+  --enable WLAN_VENDOR_RALINK \
   --module CFG80211 \
   --module MAC80211 \
   --module RT2X00 \
   --module RT2X00_LIB \
+  --module RT2X00_LIB_MMIO \
+  --module RT2X00_LIB_USB \
   --module RT2X00USB \
   --module RT73USB
 
 make olddefconfig
+# sanity check: this must print CONFIG_RT73USB=m
+grep '^CONFIG_RT73USB=m' .config || echo "CONFIG_RT73USB was silently dropped!"
 ```
+
+> ⚠️ **`WLAN_VENDOR_RALINK` must be enabled first.** `config-wsl` disables every wireless vendor except MediaTek, so the `RT73USB`/`RT2X00*` symbols are invisible to Kconfig and `make olddefconfig` **silently drops** them — the build completes successfully but produces no `rt73usb.ko`. Always run the `grep` sanity check above before compiling.
 
 ### Option B: Via Interactive Menu (`menuconfig`)
 Launch the configuration UI:
@@ -126,3 +136,5 @@ kernel=C:\\wsl\\wsl-kernel-bzImage
    ```
 
 If `rt73usb` appears in the output, your custom WSL2 kernel is ready for **aiyuspot**!
+
+> **ℹ️ Firmware note:** kernel `request_firmware()` reads `/lib/firmware` in the WSL2 VM **init mount namespace**, not the distro's. Both `rt73.bin` and the AIC8800 blobs must be visible there — `wifi-control.bat` stages them automatically at launch (see [`fwserve/README.md`](../fwserve/README.md)). Keep `CONFIG_FW_LOADER_USER_HELPER=y` (stock WSL2 default) so the sysfs fallback stays available for `fwserve`.
