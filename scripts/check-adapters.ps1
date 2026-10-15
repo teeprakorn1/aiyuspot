@@ -24,7 +24,7 @@ Write-Host '=== WiFi Adapter Check ===' -ForegroundColor Cyan
 Write-Host ''
 
 Write-Host '-- usbipd devices --' -ForegroundColor Yellow
-$list = & $Usbipd list 2>$null
+try { $list = & $Usbipd list 2>$null } catch { $list = @() }
 $supported = @()
 foreach ($hwid in $profiles.Keys) {
     $line = $list | Where-Object { $_ -match [regex]::Escape($hwid) } | Select-Object -First 1

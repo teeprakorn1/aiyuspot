@@ -18,6 +18,7 @@ run_hotspot() {
   HOSTAPD_WPA2_BIN="$STUBS/hostapd" HOSTAPD_WEP_BIN="$STUBS/hostapd-wep" \
   PATH="$STUBS:$PATH" bash "$SCRIPT" "$1" "$2" "$3" >"$dir/out" 2>&1
   local rc=$?
+  LAST_DIR="$dir"
   echo "$dir"   # caller reads conf/out from dir; rc via $? cannot survive - print it
   echo "$rc" > "$dir/rc"
 }
@@ -26,7 +27,12 @@ run_hotspot() {
 
 t() {
   local name="$1"; shift
-  "$@" >/dev/null 2>&1 && ok "$name" || fail "$name"
+  if "$@" >/dev/null 2>&1; then ok "$name"; else
+    fail "$name"
+    if [ -n "${LAST_DIR:-}" ] && [ -s "$LAST_DIR/out" ]; then
+      sed 's/^/        | /' "$LAST_DIR/out" | tail -5
+    fi
+  fi
 }
 
 echo "== validation (fail fast, no conf written) =="
