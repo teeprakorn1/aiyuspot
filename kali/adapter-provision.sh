@@ -117,7 +117,7 @@ MODE="${2:-wpa2}"
 line=$(grep -v '^[[:space:]]*#' "$CONF" | awk -F'|' -v id="$HWID" '
   { n=split($1,a,","); for (k=1;k<=n;k++) if (a[k]==id) {print; exit} }')
 [ -z "$line" ] && { echo "no registry entry for $HWID"; alog L2 registry "rc=1 no profile $HWID"; exit 1; }
-IFS='|' read -r ids wifi_ids name mod prem fwst fwpkg kconf msw mink inst status note <<<"$line"
+IFS='|' read -r _ _ name mod _ fwst fwpkg _ _ _ inst status _ <<<"$line"
 echo "== provision: $name [$HWID] status=$status =="
 
 # ---------- Phase A: packages/helpers (auto, idempotent) ----------

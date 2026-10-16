@@ -565,18 +565,22 @@ echo   - Use only for wedged PnP/USB states ^(Code 19, dead device I/O^)
 echo.
 rem Confirm once, THEN elevate: the elevated child is re-invoked as
 rem `reset YES` so it skips this prompt instead of asking a second time.
-rem (`wifi-control.bat reset YES` typed directly is an explicit confirm.)
-if /i not "%~2"=="YES" (
+rem `AIYUSPOT_YES=1` is the explicit non-interactive automation form.
+set "RESET_CONFIRMED="
+if /i "%~2"=="YES" set "RESET_CONFIRMED=1"
+if "%AIYUSPOT_YES%"=="1" set "RESET_CONFIRMED=1"
+if not "!RESET_CONFIRMED!"=="1" (
   set "CONFIRM="
   set /p "CONFIRM=Type YES to continue: "
   rem !CONFIRM! is required here: %CONFIRM% would expand at block-parse
   rem time (before set /p runs) making the prompt always "Cancelled".
-  if /i not "!CONFIRM!"=="YES" (
-    echo Cancelled.
-    call :log L1 reset - "user declined"
-    if "%CLI_MODE%"=="0" (pause & goto menu)
-    exit /b 1
-  )
+  if /i "!CONFIRM!"=="YES" set "RESET_CONFIRMED=1"
+)
+if not "!RESET_CONFIRMED!"=="1" (
+  echo Cancelled.
+  call :log L1 reset - "user declined"
+  if "%CLI_MODE%"=="0" (pause & goto menu)
+  exit /b 1
 )
 net session >nul 2>&1
 if %errorlevel% neq 0 (

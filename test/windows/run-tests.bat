@@ -48,11 +48,13 @@ net session >nul 2>&1
 if %errorlevel%==0 (
   >"%TEMP%\aiyu-stub-reset.ps1" echo exit 0
   set "AIYUSPOT_RESET_PS1=%TEMP%\aiyu-stub-reset.ps1"
-  echo YES | call %BAT% reset >"%TEMP%\aiyu-reset-yes.out" 2>&1
+  set "AIYUSPOT_YES=1"
+  call %BAT% reset >"%TEMP%\aiyu-reset-yes.out" 2>&1
   set "RRC=!errorlevel!"
   findstr /c:"Cancelled" "%TEMP%\aiyu-reset-yes.out" >nul
   if errorlevel 1 (call :ok "reset YES proceeds past confirm") else (call :fail "reset YES wrongly cancelled")
   if "!RRC!"=="0" (call :ok "reset stub rc propagates") else (call :fail "reset rc=!RRC! want 0")
+  set "AIYUSPOT_YES="
   set "AIYUSPOT_RESET_PS1="
   del "%TEMP%\aiyu-reset-yes.out" "%TEMP%\aiyu-stub-reset.ps1" >nul 2>&1
 ) else (
