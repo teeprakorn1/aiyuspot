@@ -1,0 +1,6 @@
+#!/bin/sh
+# Stand-in for an out-of-tree driver installer (adapters.conf install col).
+# Marks the module as installed so the modinfo stub resolves it.
+echo "$@" >>"${STUB_STATE:-/tmp}/driver-build.log" 2>/dev/null
+touch "${STUB_STATE:-/tmp}/mod-installed-aic8800_fdrv"
+exit "${STUB_DRIVER_BUILD_RC:-0}"

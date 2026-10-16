@@ -1,0 +1,18 @@
+#!/bin/sh
+# Logs invocations; 'install' also drops a marker file per package so tests
+# can assert what would have been installed.
+# STUB_APT_DELIVERS="rt73.bin rtlwifi/x.bin" -> pretend the package really
+# delivered those blobs: creates them under $FWDIR (provision's post-install
+# firmware re-check then passes, as on real hardware).
+echo "$@" >>"${STUB_STATE:-/tmp}/apt.log" 2>/dev/null
+if [ "$1" = "install" ]; then
+  shift
+  for a in "$@"; do
+    case "$a" in -*) ;; *) touch "${STUB_STATE:-/tmp}/apt-installed-$a" 2>/dev/null || true ;; esac
+  done
+  for f in ${STUB_APT_DELIVERS:-}; do
+    mkdir -p "$(dirname "${FWDIR:-/lib/firmware}/$f")" 2>/dev/null || true
+    touch "${FWDIR:-/lib/firmware}/$f" 2>/dev/null || true
+  done
+fi
+exit 0

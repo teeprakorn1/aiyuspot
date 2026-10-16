@@ -4,7 +4,48 @@ All notable changes to **aiyuspot** are documented here. This project follows [K
 
 ---
 
-## [0.2.0] — Unreleased
+## [0.3.0] — 2026-10-16
+
+### 🧬 Registry-driven adapters and reliable hotspot lifecycle
+
+Version 0.3.0 replaces scattered adapter lists with one registry-driven
+configuration, adds automatic provisioning and unknown-adapter support,
+and makes failures visible from USB attach through AP startup. The same
+release also verifies the Edimax EW-7611ULB v1 on real clients in WPA2,
+WEP, and Open modes.
+
+### 🆕 Added
+
+- **`adapters.conf` registry** — one 13-column source of truth for VID:PIDs, drivers, firmware, kernel symbols, minimum kernels, installers, and adapter status.
+- **Automatic setup** — `wifi-control.bat provision` installs the detected adapter's packages, firmware, kernel requirements, and out-of-tree driver.
+- **Unknown-adapter fallback** — confidence-ranked detection, explicit confirmation for low-confidence matches, busid-scoped attach, generic modalias probing, and a hard `iw` AP-capability gate.
+- **Diagnostics** — `wifi-control.bat diag`, Windows/Kali error logs, secret-safe messages, per-profile kernel checks, firmware staging, and automatic `fwserve` installation.
+- **Additional profiles** — MediaTek, Atheros, and Realtek families, including the distinct EW-7611ULB V2 (`7392:d611`) profile.
+
+### 🔧 Changed
+
+- **Adapter decisions** now derive from `adapters.conf`; kernel Kconfig requirements, interface selection, health reporting, and provisioning follow the registry.
+- **AP validation** is scoped to the selected physical interface, with support for 2.4 GHz and 5 GHz-capable adapters.
+- **Firmware lifecycle** stages firmware and starts `fwserve` before USB attach, preventing driver-probe races.
+- **User feedback** shows live driver-loading progress, bounded timeouts, interface-poll progress, and reliable UAC results before returning to the menu.
+
+### 🐛 Fixed
+
+- **Windows launcher:** parenthesis and pipe parsing, unsafe dispatch, lost `wsl.exe`/`usbipd` exit codes, reset confirmation, EOF prompts, USB binding persistence, and incorrect `Shared (bound)` health results.
+- **UAC flow:** elevated child results no longer disappear or block the parent menu; success and failure codes are transferred through the exit-code handshake.
+- **Kali firmware:** AIC8800 rebind, `!`-encoded subdirectory names, truncated firmware aborts, stale `fwserve` binaries, and masked staging failures.
+- **Hotspot lifecycle:** partial hostapd/DHCP/forwarding/NAT startup is rolled back as one operation, and daemon cleanup tolerates missing processes.
+- **Provisioning:** missing required firmware, kernel/build trees, invalid `.wslconfig` kernel pointers, non-root execution, missing Windows mounts, and false success from pre-existing interfaces.
+- **Input and safety:** shell metacharacter validation, SSID/passphrase handling, out-of-tree driver failure reporting, and secret-safe logging.
+
+### 🧪 Tests
+
+- **All suites pass:** 46 hotspot, 32 provisioning, 8 fwserve-C, 21 Pester, and 17 batch checks.
+- **Real-client verification:** Edimax WPA2 `4.20/3.00 Mbps` with `15 ms` idle ping; WEP `3.17/2.18 Mbps` with `50 ms`; Open `5.31/6.00 Mbps` with `36 ms`. WPA2 remains the recommended mode; WEP and Open are for legacy/testing use.
+
+---
+
+## [0.2.0] — 2026-10-15
 
 ### 🎨 UX overhaul — Launcher that punished mistakes instead of guiding
 
@@ -121,6 +162,7 @@ First public release. **aiyuspot** turns a USB Wi-Fi adapter passed through to K
 - `wslpath` round-trip — `D:\Teepakorn-54850\non-work\aiyuspot` → `/mnt/d/Teepakorn-54850/non-work/aiyuspot`
 - GitHub anchor slugs verified for emoji/VS16 headings across README, SETUP.md, and docs
 
+[0.3.0]: https://github.com/teeprakorn1/aiyuspot/releases/tag/v0.3.0
 [0.2.0]: https://github.com/teeprakorn1/aiyuspot/releases/tag/v0.2.0
 [0.1.1]: https://github.com/teeprakorn1/aiyuspot/releases/tag/v0.1.1
 [0.1.0]: https://github.com/teeprakorn1/aiyuspot/releases/tag/v0.1.0

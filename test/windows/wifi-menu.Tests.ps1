@@ -25,7 +25,7 @@ Describe 'menu tree shape' {
 
 Describe 'menu Cmd -> bat verb consistency' {
     It 'every Cmd maps to a bat verb or a Build-Args special case' {
-        $batVerbs = 'default','open','wep','wpa2','stop','reset','check','driver','kernel','help'
+        $batVerbs = 'default','open','wep','wpa2','stop','reset','check','diag','driver','kernel','provision','help'
         $special  = 'default-wep',''   # handled inside Build-Args
         $cmds = @()
         foreach ($item in $menu) {
@@ -57,6 +57,29 @@ Describe 'Build-Args' {
     It 'reset is a single verb with no args' {
         $r = Build-Args -Cmd 'reset'
         $r.Args | Should -Be @('reset')
+    }
+}
+
+Describe 'Invoke-WifiControl' {
+    # Regression: the bat's stdout once flowed into the function return,
+    # making $code an Object[] so `-eq 0` filtered instead of comparing and
+    # every command reported "failed". Out-Host diverts output; the return
+    # must stay a scalar int.
+    BeforeEach {
+        $env:AIYUSPOT_LOG = Join-Path $env:TEMP 'aiyu-pester-log.txt'
+    }
+    AfterEach {
+        Remove-Item $env:AIYUSPOT_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:AIYUSPOT_LOG -ErrorAction SilentlyContinue
+    }
+    It 'returns a scalar int, not the bat stdout' {
+        $r = Invoke-WifiControl -A @('bogus')
+        @($r).Count | Should -Be 1
+        $r | Should -BeOfType [int]
+        $r | Should -Be 2
+    }
+    It 'returns 0 for help' {
+        Invoke-WifiControl -A @('help') | Should -Be 0
     }
 }
 

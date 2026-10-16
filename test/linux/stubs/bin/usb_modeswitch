@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "$@" >>"${STUB_STATE:-/tmp}/modeswitch.log" 2>/dev/null
+exit 0

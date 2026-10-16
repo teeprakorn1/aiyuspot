@@ -1,0 +1,7 @@
+#!/bin/sh
+# uname -r -> STUB_UNAME_R (default 6.6.0-0)
+case "$1" in
+  -r) echo "${STUB_UNAME_R:-6.6.0-0}" ;;
+  *)  echo "Linux" ;;
+esac
+exit 0

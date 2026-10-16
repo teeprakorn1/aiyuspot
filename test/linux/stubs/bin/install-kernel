@@ -1,0 +1,4 @@
+#!/bin/sh
+# Stand-in for kali/driver/install-rt73.sh (INSTALL_KERNEL override).
+echo "$@" >>"${STUB_STATE:-/tmp}/kernel-build.log" 2>/dev/null
+exit "${STUB_KERNEL_BUILD_RC:-0}"

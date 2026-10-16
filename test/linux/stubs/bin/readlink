@@ -1,2 +1,5 @@
 #!/bin/sh
-exit 0
+# Pass through to the real readlink - the stub sysfs root lives on the
+# real filesystem, so driver symlinks under it resolve genuinely. This
+# keeps the driver-name preference path (pick_wifi_if) testable.
+exec /usr/bin/readlink "$@"

@@ -1,0 +1,9 @@
+#!/bin/sh
+# STUB_MOD_MISSING="mod1 mod2" -> modinfo fails for those modules, unless
+# $STUB_STATE/mod-installed-<mod> exists (out-of-tree installer marker).
+for mod in "$@"; do :; done
+for m in ${STUB_MOD_MISSING:-__none__}; do
+  [ "$mod" = "$m" ] && [ ! -f "${STUB_STATE:-/tmp}/mod-installed-$mod" ] && exit 1
+done
+echo "filename: /lib/modules/0.0.0/kernel/drivers/net/wireless/$mod.ko"
+exit 0

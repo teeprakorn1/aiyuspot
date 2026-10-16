@@ -1,0 +1,4 @@
+#!/bin/sh
+# STUB_PGREP_RC=N -> nonzero simulates "no such process" (post-daemonize
+# hostapd liveness check). Default: process considered alive.
+exit "${STUB_PGREP_RC:-0}"

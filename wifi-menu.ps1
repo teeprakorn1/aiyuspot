@@ -7,7 +7,7 @@
     Custom WEP/WPA2/Open items prompt for SSID and key with project
     defaults and validate lengths before launching.
 .NOTES
-    Version: 0.2.0
+    Version: 0.3.0
     Part of: https://github.com/teeprakorn1/aiyuspot
 #>
 $ErrorActionPreference = 'Stop'
@@ -23,13 +23,15 @@ $menu = @(
     )},
     @{ Name = 'Tools';          Desc = 'Status and stop';         Sub = @(
         @{ Name = 'Check adapters'; Desc = 'Detect USB adapters, drivers and hotspot state - run this first'; Cmd = 'check' },
+        @{ Name = 'Error log';      Desc = 'Show collected errors from the launcher, Kali scripts and fwserve'; Cmd = 'diag' },
         @{ Name = 'Stop WiFi';      Desc = 'Stop hotspot, detach USB, terminate the kali-linux distro';       Cmd = 'stop' }
     )},
-    @{ Name = 'Setup';          Desc = 'One-time driver/kernel builds in Kali'; Sub = @(
-        @{ Name = 'Build custom kernel';   Desc = 'WSL2 kernel with rt73usb - RT73 driver + TX1U build headers (~20-40 min)'; Cmd = 'kernel' },
-        @{ Name = 'Install TX1U driver';   Desc = 'Build AIC8800 driver for Archer TX1U Nano (needs kernel tree)';            Cmd = 'driver' }
+    @{ Name = 'Setup';          Desc = 'One-time driver/kernel/firmware installs in Kali'; Sub = @(
+        @{ Name = 'Auto-setup adapter';          Desc = 'Detect adapter and install what it needs - packages, firmware, kernel, driver'; Cmd = 'provision' },
+        @{ Name = 'Advanced: build kernel';      Desc = 'WSL2 kernel with all adapters.conf modules (~20-40 min)';              Cmd = 'kernel' },
+        @{ Name = 'Advanced: TX1U driver build'; Desc = 'Out-of-tree AIC8800 driver for Archer TX1U Nano (needs kernel tree)';  Cmd = 'driver' }
     )},
-    @{ Name = 'Reset adapter state (destructive)'; Desc = 'Wipes ALL usbipd bindings + registry purge, RT73 only - asks YES'; Cmd = 'reset' },
+    @{ Name = 'Reset adapter state (destructive)'; Desc = 'Wipes ALL usbipd bindings + registry purge, targets detected adapter (RT73 default) - asks YES'; Cmd = 'reset' },
     @{ Name = 'Exit';  Desc = 'Close the menu';  Cmd = '' }
 )
 
@@ -46,6 +48,10 @@ function Read-ValidatedKey {
     while ($true) {
         $k = Read-KeyWithDefault $Prompt $Default
         $len = $k.Length
+        if ($k -match '[&|<>"'']' -or $k -match '[^ -~]') {
+            Write-Host '  Key must be printable ASCII and must not contain & | < > " or ''.' -ForegroundColor Red
+            continue
+        }
         if ($Mode -eq 'wep') {
             if ($len -eq 5 -or $len -eq 13) { return $k }
             Write-Host "  WEP key must be exactly 5 or 13 characters (got $len). Ctrl+C to abort." -ForegroundColor Red
@@ -59,6 +65,13 @@ function Read-ValidatedKey {
 function Read-ValidSsid {
     while ($true) {
         $ssid = Read-KeyWithDefault 'SSID' 'aiyuspot'
+        # Printable ASCII only and no shell metachars - bat/wsl arg
+        # passing and hostapd.conf quoting both rely on it; Kali
+        # re-checks in bytes anyway.
+        if ($ssid -match '[&|<>"'']' -or $ssid -match '[^ -~]') {
+            Write-Host '  SSID must be printable ASCII and must not contain & | < > " or ''.' -ForegroundColor Red
+            continue
+        }
         if ($ssid.Length -ge 1 -and $ssid.Length -le 32) { return $ssid }
         Write-Host '  SSID must be 1-32 characters. Ctrl+C to abort.' -ForegroundColor Red
     }
@@ -87,7 +100,7 @@ function Build-Args {
         'reset' {
             Write-Host ''
             Write-Host '  DESTRUCTIVE: wipes ALL usbipd bindings + purges device registry.' -ForegroundColor Red
-            Write-Host '  RT73 only. You will be asked to type YES again inside the command.' -ForegroundColor Red
+            Write-Host '  Targets the detected adapter (RT73 default). Type YES inside the command.' -ForegroundColor Red
             return @{ Args = @('reset'); Show = "$batch reset" }
         }
         default {
@@ -102,7 +115,7 @@ function Show-Menu {
     Clear-Host
     Write-Host '========================================' -ForegroundColor DarkCyan
     Write-Host '  aiyuspot - USB WiFi Hotspot' -ForegroundColor Yellow
-    Write-Host '  Version 0.2.0' -ForegroundColor DarkYellow
+    Write-Host '  Version 0.3.0' -ForegroundColor DarkYellow
     Write-Host "  $Title" -ForegroundColor Gray
     Write-Host '========================================' -ForegroundColor DarkCyan
 
@@ -120,8 +133,10 @@ function Show-Menu {
 function Read-MenuKey { [Console]::ReadKey($true) }
 function Invoke-WifiControl {
     param([string[]]$A)
-    & $script:batch @A
-    return $LASTEXITCODE
+    # Unqualified $batch: resolves via the scope chain both under normal
+    # -File execution and when dot-sourced inside Pester's module scope.
+    & $batch @A | Out-Host
+    return [int]$LASTEXITCODE
 }
 
 # --- Menu engine ---------------------------------------------------------------
@@ -193,6 +208,7 @@ try {
             Write-Host 'Done - command finished successfully.' -ForegroundColor Green
         } else {
             Write-Host "Command failed (exit $code) - scroll up for the error." -ForegroundColor Red
+            Write-Host "  Tip: run 'wifi-control.bat diag' to see the collected error log." -ForegroundColor DarkGray
         }
         Read-Host 'Press Enter to return to the menu'
     }

@@ -31,6 +31,42 @@ UPLINK_IF="eth0"
 
 [ "$EUID" -ne 0 ] && { echo "Run as root"; exit 1; }
 
+# Shared error log (see :log in wifi-control.bat) - best-effort append;
+# logging must never change exit codes or trip set -e.
+ALOG="${AIYUSPOT_LOG:-/var/log/aiyuspot.log}"
+alog() {
+  printf '%s|%s|%s|%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%F %T')" \
+    "$1" "$2" "$3" >>"$ALOG" 2>/dev/null || true
+}
+
+command -v iw >/dev/null 2>&1 || {
+  echo "iw is not installed - run 'wifi-control.bat provision' first"
+  alog L3 hotspot "rc=1 iw missing"
+  exit 1
+}
+
+# Roll back partial bring-up: a failure after hostapd/dnsmasq/NAT setup
+# would otherwise leave an SSID broadcasting with no DHCP or NAT. The
+# flag flips only once every step has succeeded.
+AP_DONE=""
+cleanup_partial() {
+  [ -n "$AP_DONE" ] && return 0
+  trap - EXIT
+  # Every line needs || true: under set -e a single failing pkill/ip
+  # (e.g. 'no process matched') would abort the rest of the cleanup.
+  pkill -x hostapd-wep 2>/dev/null || true
+  pkill -x hostapd 2>/dev/null || true
+  pkill -x dnsmasq 2>/dev/null || true
+  if [ -n "${WIFI_IF:-}" ]; then
+    iptables-legacy -t nat -D POSTROUTING -o "$UPLINK_IF" -s "$HOTNET" -j MASQUERADE 2>/dev/null || true
+    iptables-legacy -D FORWARD -i "$WIFI_IF" -o "$UPLINK_IF" -j ACCEPT 2>/dev/null || true
+    iptables-legacy -D FORWARD -i "$UPLINK_IF" -o "$WIFI_IF" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+    ip addr del "$HOTIP/24" dev "$WIFI_IF" 2>/dev/null || true
+  fi
+  return 0
+}
+trap cleanup_partial EXIT
+
 # --- Validate inputs before touching any interface or file ---
 case "$MODE" in
   wep|open|wpa2) ;;
@@ -62,27 +98,57 @@ elif [ "$MODE" = "wpa2" ]; then
     exit 2
   fi
 fi
+# Keys land in hostapd.conf verbatim - reject quotes and any
+# non-printable byte. (grep can't see '\n' - it's a line separator -
+# so strip printable bytes with tr and check anything remains.)
+if [ -n "$HOTPASS" ] && { [[ "$HOTPASS" == *'"'* ]] \
+   || [ "$(printf %s "$HOTPASS" | LC_ALL=C tr -d '[:print:]' | wc -c)" -gt 0 ]; }; then
+  echo "Key must not contain quotes or control characters"
+  exit 2
+fi
+
+# Registry of supported adapters - one pipe-delimited profile per line
+# (see adapters.conf header for the 13-field schema).
+ADAPTERS_CONF="${ADAPTERS_CONF:-$(cd "$(dirname "$0")/.." && pwd)/adapters.conf}"
+SYSFS="${SYSFS:-/sys}"   # test seam: stub sysfs root
 
 # Load the driver for whichever adapter is attached
 # (backup; the launcher already modprobes before calling us).
-lsusb | grep -qi '148f:2573' && { modprobe rt73usb 2>/dev/null && echo "rt73usb: OK"; }
-if lsusb | grep -qi '3625:0110'; then
-  modprobe aic_load_fw 2>/dev/null || true
-  modprobe aic8800_fdrv 2>/dev/null && echo "aic8800_fdrv: OK" || true
-fi
+# Registry-driven: wifi_ids hit -> modprobe pre_modules then module.
+while IFS='|' read -r _ids _wifi _name _mod _prem _rest; do
+  case "$_ids" in ''|\#*) continue ;; esac
+  [ "$_mod" = "-" ] && continue
+  _hit=""
+  IFS=',' read -ra _wids <<<"$_wifi"
+  for _w in "${_wids[@]}"; do lsusb | grep -qi "$_w" && { _hit=1; break; }; done
+  [ -z "$_hit" ] && continue
+  if [ "$_prem" != "-" ]; then modprobe $_prem 2>/dev/null || true; fi
+  if modprobe "$_mod" 2>/dev/null; then
+    echo "$_mod: OK"
+  else
+    echo "  modprobe $_mod failed - module missing from this kernel?"
+    alog L3 modprobe "rc=1 $_mod"
+  fi
+done < "$ADAPTERS_CONF"
 true
 
 # Pick the wireless iface bound to a supported adapter driver.
-# Preference order: aic8800_fdrv (TX1U) -> rt73usb (RT73) -> any wl* iface.
+# Preference order = adapters.conf file order (module column), then any
+# phy80211-capable netdev (unregistered adapters), then any wl* iface.
 pick_wifi_if() {
-  for drv in aic8800_fdrv rt73usb; do
-    for p in /sys/class/net/*/device/driver; do
+  while IFS='|' read -r _ids _w _n mod _r; do
+    case "$_ids" in ''|\#*) continue ;; esac
+    [ "$mod" = "-" ] && continue
+    for p in $SYSFS/class/net/*/device/driver; do
       [ -e "$p" ] || continue
-      if [ "$(basename "$(readlink "$p")")" = "$drv" ]; then
+      if [ "$(basename "$(readlink "$p")")" = "$mod" ]; then
         basename "$(dirname "$(dirname "$p")")"
         return 0
       fi
     done
+  done < "$ADAPTERS_CONF"
+  for p in $SYSFS/class/net/*/phy80211; do
+    [ -e "$p" ] && { basename "$(dirname "$p")"; return 0; }
   done
   ip -br link | awk '/^[wW]l/ {print $1; exit}'
 }
@@ -92,18 +158,25 @@ pick_wifi_if() {
 # module is resident; a fresh bind retries it without dropping the
 # usbipd attach.
 rebind_aic() {
-  for i in /sys/bus/usb/devices/*:*; do
+  for i in $SYSFS/bus/usb/devices/*:*; do
     [ -d "$i" ] || continue
-    p=$(dirname "$i")
-    [ -f "$p/idVendor" ] || continue
-    [ "$(cat "$p/idVendor" 2>/dev/null)" = "3625" ] || continue
+    # Entries here are symlinks into /sys/devices; the device dir is the
+    # interface's parent, reachable via ../ - never dirname(1).
+    [ "$(cat "$i/../idVendor" 2>/dev/null)" = "3625" ] || continue
+    [ "$(cat "$i/../idProduct" 2>/dev/null)" = "0110" ] || continue
     dev=$(basename "$i")
-    echo "$dev" > /sys/bus/usb/drivers/aic8800_fdrv/unbind 2>/dev/null || continue
+    # unbind is best-effort, never fatal: the whole point of this retry
+    # is a device whose first probe FAILED - which often means it is not
+    # bound at all, and writing an unbound id returns -ENODEV. Skipping
+    # the bind on that error made this remediation dead code.
+    echo "$dev" > "$SYSFS/bus/usb/drivers/aic8800_fdrv/unbind" 2>/dev/null || true
     sleep 1
-    if echo "$dev" > /sys/bus/usb/drivers/aic8800_fdrv/bind 2>/dev/null; then
+    if echo "$dev" > "$SYSFS/bus/usb/drivers/aic8800_fdrv/bind"; then
       echo "re-probed $dev on aic8800_fdrv"
+      alog L3 rebind "rc=0 re-probed $dev"
     else
       echo "re-probe FAILED for $dev" >&2
+      alog L3 rebind "rc=1 re-probe failed $dev"
     fi
   done
   return 0
@@ -119,16 +192,24 @@ for i in $(seq 1 15); do
     echo "No iface yet - retrying aic8800_fdrv probe..."
     rebind_aic
   fi
+  if [ $((i % 3)) -eq 0 ]; then echo "  waiting for WiFi interface... ${i}s/15s"; fi
   sleep 1
 done
 
 echo "Using WiFi interface: ${WIFI_IF:-none}"
 ip -br link
-lsusb | grep -iE '148f:2573|3625:0110|ralink|aicsemi' || echo "Supported adapter not found; check usbipd attach"
+WIDS=$(awk -F'|' '!/^[[:space:]]*#/ && NF>1 {gsub(",","|",$2); printf "%s|", $2}' "$ADAPTERS_CONF")
+WIDS=${WIDS%|}
+# Only warn when the failure is real: an unregistered (--generic) adapter
+# can't match the registry list even on the success path.
+if [ -z "$WIFI_IF" ]; then
+  lsusb | grep -iE "$WIDS" || echo "Registered adapter not found; check usbipd attach"
+fi
 iw dev 2>/dev/null || true
 if [ -z "$WIFI_IF" ]; then
   echo "WiFi interface never appeared - last kernel messages:"
   dmesg | tail -n 20
+  alog L3 hotspot "rc=1 no wifi iface after 15s"
   exit 1
 fi
 pkill -x hostapd-wep 2>/dev/null || true
@@ -136,11 +217,31 @@ pkill -x hostapd 2>/dev/null || true
 ip link set "$WIFI_IF" down 2>/dev/null || true
 iw dev "$WIFI_IF" set type managed 2>/dev/null || true
 ip link set "$WIFI_IF" up 2>/dev/null || { echo "Failed to bring up $WIFI_IF"; exit 1; }
-# iw list indents section items by two tabs; a lone \t line ends the block.
-if ! iw list 2>/dev/null | awk '/Supported interface modes/{f=1;next} f&&/^\t\t/{print} f&&!/^\t\t/{f=0}' | grep -qw 'AP'; then
-  echo "WARNING: $WIFI_IF does not advertise AP mode - hostapd may fail."
-  echo "         (Both adapters verified in AP mode; RT73 WPA2 uses TKIP fallback.)"
+# Hard AP gate: scope iw to the SELECTED interface's phy - with multiple
+# adapters attached, another phy's capabilities must not pass the gate.
+# `iw list` indents section items by two tabs; a lone \t line ends the
+# block. No AP advertisement -> fail before hostapd retries.
+PHY=$(iw dev "$WIFI_IF" info 2>/dev/null | sed -n 's/.*wiphy \([0-9][0-9]*\).*/\1/p')
+if [ -n "$PHY" ]; then
+  IWDUMP=$(iw phy$PHY info 2>/dev/null)
+else
+  echo "  note: no wiphy id for $WIFI_IF - checking the global iw list instead"
+  IWDUMP=$(iw list 2>/dev/null)
 fi
+IWMODES=$(printf '%s\n' "$IWDUMP" | awk '/Supported interface modes/{f=1;next} f&&/^\t\t/{print} f&&!/^\t\t/{f=0}')
+if ! echo "$IWMODES" | grep -qw 'AP'; then
+  echo "ERROR: $WIFI_IF does not advertise AP mode - cannot host." >&2
+  drv=$(basename "$(readlink "$SYSFS/class/net/$WIFI_IF/device/driver" 2>/dev/null)" 2>/dev/null)
+  [ -n "$drv" ] && echo "  bound driver: $drv" >&2
+  echo "  Causes: driver lacks AP support, or kernel too old" >&2
+  echo "  (rtl8xxxu needs >=6.6; run 'wifi-control.bat kernel' on a stale clone)." >&2
+  alog L3 hotspot "rc=1 $WIFI_IF no AP mode${drv:+ ($drv)}"
+  exit 1
+fi
+# Band-aware mode: a phy without Band 1 (2.4 GHz) cannot do hw_mode=g/ch6.
+HWMODE=g
+HOTCHAN=6
+printf '%s\n' "$IWDUMP" | grep -q 'Band 1:' || { HWMODE=a; HOTCHAN=36; }
 ip addr replace "$HOTIP/24" dev "$WIFI_IF"
 
 if [ "$MODE" = "wpa2" ]; then
@@ -149,8 +250,8 @@ if [ "$MODE" = "wpa2" ]; then
 interface=$WIFI_IF
 driver=nl80211
 ssid=$HOTSSID
-hw_mode=g
-channel=6
+hw_mode=$HWMODE
+channel=$HOTCHAN
 wpa=2
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
@@ -162,8 +263,8 @@ elif [ "$MODE" = "open" ]; then
 interface=$WIFI_IF
 driver=nl80211
 ssid=$HOTSSID
-hw_mode=g
-channel=6
+hw_mode=$HWMODE
+channel=$HOTCHAN
 auth_algs=1
 EOF
 else
@@ -172,8 +273,8 @@ else
 interface=$WIFI_IF
 driver=nl80211
 ssid=$HOTSSID
-hw_mode=g
-channel=6
+hw_mode=$HWMODE
+channel=$HOTCHAN
 auth_algs=1
 wep_default_key=0
 wep_key0="$HOTPASS"
@@ -197,6 +298,7 @@ for _try in 1 2 3 4; do
 done
 if [ -z "$AP_UP" ]; then
   echo "hostapd could not enable AP mode on $WIFI_IF"
+  alog L3 hotspot "rc=1 hostapd AP-up failed $WIFI_IF"
   exit 1
 fi
 pkill -x dnsmasq 2>/dev/null || true
@@ -218,6 +320,18 @@ IPT=iptables-legacy
 $IPT -t nat -C POSTROUTING -o "$UPLINK_IF" -s "$HOTNET" -j MASQUERADE 2>/dev/null || $IPT -t nat -A POSTROUTING -o "$UPLINK_IF" -s "$HOTNET" -j MASQUERADE
 $IPT -C FORWARD -i "$WIFI_IF" -o "$UPLINK_IF" -j ACCEPT 2>/dev/null || $IPT -A FORWARD -i "$WIFI_IF" -o "$UPLINK_IF" -j ACCEPT
 $IPT -C FORWARD -i "$UPLINK_IF" -o "$WIFI_IF" -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || $IPT -A FORWARD -i "$UPLINK_IF" -o "$WIFI_IF" -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+# hostapd can die right after daemonizing (-B): confirm it is still
+# alive before declaring success - the cleanup trap rolls back if not.
+# (pgrep comes from procps; skip the check where it is absent.)
+if command -v pgrep >/dev/null 2>&1; then
+  pgrep -x "$(basename "$HOSTAPD_BIN")" >/dev/null 2>&1 || {
+    echo "hostapd exited after daemonizing - check hostapd output"
+    alog L3 hotspot "rc=1 hostapd died post-daemonize"
+    exit 1
+  }
+fi
+AP_DONE=1   # from here on, nothing may roll back
 
 echo "WiFi started: $HOTSSID"
 case "$MODE" in

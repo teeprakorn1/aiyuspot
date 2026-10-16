@@ -7,7 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge" alt="License: MIT"></a>
   <a href="https://github.com/teeprakorn1/aiyuspot"><img src="https://img.shields.io/badge/platform-Windows%20%2B%20WSL2-blue?style=for-the-badge" alt="Platform"></a>
-  <a href="https://github.com/teeprakorn1/aiyuspot"><img src="https://img.shields.io/badge/version-v0.2.0-orange?style=for-the-badge" alt="Version"></a>
+  <a href="https://github.com/teeprakorn1/aiyuspot"><img src="https://img.shields.io/badge/version-v0.3.0-orange?style=for-the-badge" alt="Version"></a>
 </p>
 
 ---
@@ -81,17 +81,22 @@
 | :--- | :---: | :---: | :--- |
 | **Ralink RT73** *(54M USB)* | `148f:2573` | `rt73usb` *(custom kernel)* | ✅ **Verified** — all modes client-tested (WPA2 auto-falls back to TKIP) |
 | **TP-Link Archer TX1U Nano** *(AX300, Wi-Fi 6)* | `3625:0110` <br>*(Storage: `a69c:5721`)* | `aic8800_fdrv` | ✅ **Verified** — AP works (WPA2 / WEP / Open) |
+| **Edimax EW-7611ULB** *(N150 + BT4.0)* | `7392:a611` <br>*(Clone: `0bda:b720`)* | `rtl8xxxu` *(custom kernel ≥6.6)* | ✅ **Verified** — WPA2, WEP, and Open client-tested |
 
-> ➕ **Adding another adapter:** Simply add its `VID:PID` to `wifi-control.bat` and `scripts/check-adapters.ps1`. See [docs/adapters.md](docs/adapters.md) for detailed instructions.
+All profiles live in **`adapters.conf`** — including *pending* entries for MT7921AU / MT7612U / MT7610U / AR9271 / RTL8822BU·CU / RTL8821CU·8811CU / RTL8723DU / RTL8192EU·8188FU·8192CU and a `noap` marker for MT7601U. Unregistered adapters get a best-effort fallback: `find-wifi.ps1` ranks candidates by confidence, the launcher attaches by busid, and `adapter-provision.sh --generic` modalias-probes for a driver — gated by an `iw` AP check.
+
+> ➕ **Adding another adapter:** add one line to `adapters.conf` — detection, firmware staging, modeswitch, health checks, provisioning and kernel symbols all derive from it. See [docs/adapters.md](docs/adapters.md).
 
 ---
 
 ## 🚀 Quick Start
 
 > 📦 **Full setup guide:** [SETUP.md](SETUP.md) — end-to-end installation from scratch.
+>
+> 📘 **How to use the menu and commands:** [docs/user-guide.md](docs/user-guide.md)
 
 ### 1. Install Prerequisites
-Ensure you have WSL2 with a `kali-linux` distribution and [usbipd-win](https://github.com/dorssel/usbipd-win) installed on Windows. Inside Kali, install the required packages (`hostapd`, `dnsmasq`, `iw`, `iptables`, `usb-modeswitch`), the `rt73.bin` firmware, and build the `fwserve` helper. Note that the RT73 adapter also requires a custom WSL2 kernel compiled with `rt73usb` support.
+Ensure you have WSL2 with a `kali-linux` distribution and [usbipd-win](https://github.com/dorssel/usbipd-win) installed on Windows. Then plug the adapter in and run **`wifi-control.bat provision`** (menu → *Setup → Auto-setup adapter*) — it reads the adapter's registry spec and installs what it needs: apt packages (`hostapd`, `dnsmasq`, `iw`, `iptables`, `usb-modeswitch`, the right `firmware-*` package), the `fwserve` helper, and — with a `[Y/n]` confirm — a custom kernel build. The start flow applies the kernel switch when provisioning returns code 3.
 * 📖 **Setup Guides:** [docs/prerequisites.md](docs/prerequisites.md) · [docs/kernel-build.md](docs/kernel-build.md) · [CHANGELOG.md](CHANGELOG.md)
 
 ### 2. Launch the Hotspot
@@ -117,15 +122,21 @@ wifi-control.bat wep MyNet abcde        :: Start WEP AP (Key must be 5 or 13 ASC
 wifi-control.bat wpa2 MyNet MyPass123   :: Start WPA2-PSK AP (Passphrase >= 8 chars)
 wifi-control.bat stop                   :: Stop AP, detach USB, and terminate Kali WSL
 wifi-control.bat check                  :: Run adapter & driver health report
+wifi-control.bat diag                   :: Show collected error log (Windows + Kali)
 wifi-control.bat driver                 :: Build and install AIC8800 driver in Kali (TX1U)
-wifi-control.bat kernel                 :: Build custom WSL2 kernel (RT73 driver, TX1U headers)
+wifi-control.bat kernel                 :: Build custom WSL2 kernel (all adapters.conf modules)
+wifi-control.bat provision              :: Auto-install what the detected adapter's spec needs
 wifi-control.bat reset                  :: Execute destructive PnP recovery (see warning)
+wifi-control.bat help                   :: Show usage and all commands
 ```
+
+> 📝 **CLI caveats:** SSID/passphrases containing `!` are eaten by cmd's delayed expansion — use the interactive menu instead. The menu accepts printable ASCII only and rejects `&|<>"'`. Windows validates length in *characters*; Kali enforces the real limit in *bytes* (SSID ≤ 32 B, WPA2 8–63 B) — multibyte input that passes the CLI can still be rejected inside Kali.
 
 **Network Configuration:**
 * **Subnet:** `192.168.50.0/24`
 * **DHCP Pool:** `192.168.50.10` – `192.168.50.200`
-* **Gateway / DNS:** `192.168.50.1`
+* **Gateway:** `192.168.50.1`
+* **DNS:** `10.255.255.254` (WSL2 host DNS proxy; dnsmasq runs DHCP-only)
 
 ---
 
@@ -142,12 +153,14 @@ wifi-control.bat reset                  :: Execute destructive PnP recovery (see
 
 ## 🛠️ Troubleshooting
 
+> 🔍 **Start with `wifi-control.bat diag`** (menu → *Tools → Error log*) — failure boundaries write parseable lines to `%TEMP%\aiyuspot-errors.log` (Windows: `ts|L#|site|rc=N|msg`) and `/var/log/aiyuspot.log` (Kali: `ts|L#|site|rc=N msg`), so the real cause usually shows up there before it surfaces as a symptom below. `L1` = Windows/USB/WSL transport, `L2` = provisioning, `L3` = driver/AP runtime.
+
 | Symptom | Resolution |
 | :--- | :--- |
 | **`Device busy (exported)`** or **Code 19** after reboot | Run `wifi-control.bat reset`, then physically unplug and replug the USB adapter. |
 | **`No supported adapter found`** | Run `wifi-control.bat check` and verify that the device is detected under `usbipd list`. |
 | **`rfkill` warning** inside WSL | Harmless WSL2 virtualized hardware limitation — safe to ignore. |
-| **Kernel module missing** after WSL/kernel update | Re-run `wifi-control.bat driver` (for TX1U) or rebuild/reinstall the `rt73usb` kernel modules (for RT73). |
+| **Kernel module missing** after WSL/kernel update | Re-run `wifi-control.bat driver` (for TX1U) or run `wifi-control.bat kernel` to rebuild the registry-driven custom kernel and modules. |
 | **TX1U shows a CD-ROM / access-denied dialog** | Normal — that's its storage-mode personality (`a69c:5721`). Click **Cancel**; the launcher mode-switches it automatically. |
 | **`usb_modeswitch: No devices in default mode found`** or `lsusb` hangs in Kali | A stale ghost USB device is wedging the stack. Run `wifi-control.bat stop`, then `usbipd detach --all`, then retry. (v0.1.1+ auto-`rmmod`s stale modules before attach.) |
 | **`No devices found with hardware-id 3625:0110`** | The mode-switch didn't take — unplug and replug the TX1U, then start again. |
@@ -164,26 +177,39 @@ wifi-control.bat reset                  :: Execute destructive PnP recovery (see
 ```text
 ├── SETUP.md                 # End-to-end installation guide
 ├── CHANGELOG.md             # Release history (Keep a Changelog)
+├── adapters.conf            # Adapter registry — one 13-col line per profile (source of truth)
 ├── wifi-control.bat         # Main entry point — interactive menu & CLI (portable)
-├── wifi-menu.ps1            # PowerShell arrow-key menu interface (v0.2.0)
+├── wifi-menu.ps1            # PowerShell arrow-key menu interface (v0.3.0)
 ├── scripts/                 # Windows-side utilities
 │   ├── check-adapters.ps1   # Adapter and driver health diagnostic script
+│   ├── find-wifi.ps1        # Unknown-adapter scout (tiered confidence for attach)
+│   ├── set-wslkernel.ps1    # Safe .wslconfig kernel= editor (backs up first)
 │   └── reset-rt73.ps1       # Stuck-PnP recovery utility (SYSTEM registry purge)
 ├── kali/
 │   ├── kali-wsl-hotspot.sh  # Orchestrates hostapd, dnsmasq, and iptables NAT in Kali
+│   ├── adapter-provision.sh # Spec-driven installer: pkgs / firmware / kernel / driver
 │   └── driver/
 │       ├── install-aic8800.sh  # Compiles aic8800_fdrv driver with patched VID:PID (TX1U)
-│       └── install-rt73.sh     # Builds custom WSL2 kernel with rt73usb (RT73)
+│       └── install-rt73.sh     # Builds custom WSL2 kernel (kconfig from adapters.conf)
 ├── fwserve/
-│   └── fwserve.c            # sysfs firmware fallback daemon (serves rt73.bin in WSL2)
+│   └── fwserve.c            # sysfs firmware fallback daemon (rt73.bin, rtlwifi/*, AIC8800 blobs)
+├── test/                    # Test harnesses (no hardware needed)
+│   ├── linux/               # lint + stub-PATH shell suites + stubs/
+│   ├── windows/             # batch harness + Pester + fixtures/
+│   └── c/                   # fwserve unit test
+├── .github/workflows/       # CI: Windows + Linux jobs on every push
+├── .gitattributes           # LF/CRLF line-ending rules (scripts break otherwise)
 └── docs/
     ├── architecture.md      # Layered architecture, control/data planes, failure domains
     ├── prerequisites.md     # Windows host and Kali WSL2 setup instructions
-    ├── kernel-build.md      # Guide for compiling a custom WSL2 kernel with rt73usb
+    ├── kernel-build.md      # Custom WSL2 kernel guide (kconfig from adapters.conf)
     ├── adapters.md          # Hardware notes and guide for adding new VID:PIDs
     ├── benchmarks.md        # Measured throughput/latency and how to reproduce
+    ├── user-guide.md       # Menu buttons, keyboard controls, CLI, and troubleshooting
     └── images/
-        └── e2e-architecture.jpg
+        ├── e2e-architecture.jpg
+        ├── benchmark-throughput.png
+        └── benchmark-latency.png
 ```
 
 ---
@@ -191,8 +217,8 @@ wifi-control.bat reset                  :: Execute destructive PnP recovery (see
 ## 🤝 Contributing
 
 Issues and Pull Requests are welcome! We are especially looking for:
-* Open-mode test results for the **TP-Link Archer TX1U Nano** (WPA2 and WEP are verified).
-* Support and `VID:PID` additions for new USB Wi-Fi adapters (see [docs/adapters.md](docs/adapters.md)).
+* Real-client verification for `pending` registry profiles (MT7921AU, MT7612U/7610U, AR9271, rtw88 family, rtl8xxxu gen1/gen2) — flip `status` in `adapters.conf` and add benchmark numbers.
+* `adapters.conf` lines for USB Wi-Fi adapters not yet covered (see [docs/adapters.md](docs/adapters.md)).
 
 ---
 

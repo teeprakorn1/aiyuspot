@@ -1,12 +1,37 @@
 #!/bin/sh
 # STUB_HOSTAPD_FAILS=N -> 'type managed' until ap_tries > N, then 'type AP'
+# STUB_NO_AP=1        -> 'iw list' advertises no AP mode (hard-gate test)
+# STUB_NO_BAND1=1     -> 'iw list' reports only Band 2 (5 GHz fallback)
+# STUB_PHY_NO_AP=1    -> 'iw phyN info' has NO AP but 'iw list' does
+#                        (verifies the AP gate is scoped to the picked phy)
+
+dump_list() {
+  if [ "${2:-0}" = "1" ]; then
+    printf '\tSupported interface modes:\n\t\t * IBSS\n\t\t * managed\n'
+  else
+    printf '\tSupported interface modes:\n\t\t * IBSS\n\t\t * managed\n\t\t * AP\n'
+    printf '\tDevice supports AP-side u-APSD.\n'
+  fi
+  if [ "${STUB_NO_BAND1:-0}" != "1" ]; then
+    printf 'Band 1:\n\t\tFrequencies:\n\t\t\t* 2412 MHz [1]\n'
+  else
+    printf 'Band 2:\n\t\tFrequencies:\n\t\t\t* 5180 MHz [36]\n'
+  fi
+}
+
 if [ "$1" = "list" ]; then
-  printf '\tSupported interface modes:\n\t\t * IBSS\n\t\t * managed\n\t\t * AP\n'
-  printf '\tDevice supports AP-side u-APSD.\n'
+  dump_list "$1" "${STUB_NO_AP:-0}"
   exit 0
 fi
+case "$1" in phy*)
+  # 'iw phyN info' - per-phy dump; STUB_PHY_NO_AP overrides modes for
+  # this phy only (falls back to STUB_NO_AP so both knobs gate it).
+  dump_list "$1" "${STUB_PHY_NO_AP:-${STUB_NO_AP:-0}}"
+  exit 0 ;;
+esac
 if [ "$1" = "dev" ] && [ "$3" = "info" ]; then
   n=$(cat "$STUB_STATE/ap_tries" 2>/dev/null || echo 0)
+  printf 'Interface %s\n\twiphy %s\n' "$2" "${STUB_PHY_NUM:-0}"
   if [ "$n" -gt "${STUB_HOSTAPD_FAILS:-0}" ]; then
     echo "        type AP"
   else

@@ -2,9 +2,9 @@
 .SYNOPSIS
     aiyuspot device health report - USB adapters, PnP state, services, Kali WSL state.
 .DESCRIPTION
-    Detects supported adapters by VID:PID (RT73 148f:2573, TX1U 3625:0110,
-    TX1U storage mode a69c:5721) via `usbipd list`, maps each to its Linux
-    module, reports Windows PnP status, usbipd/VBoxUSBMon services, and
+    Adapter profiles come from adapters.conf (repo root) - one registry line
+    per supported profile. Matches `usbipd list` output against every id in
+    column 1, reports Windows PnP status, usbipd/VBoxUSBMon services, and
     inside Kali: USB visibility, loaded modules, wireless interfaces,
     hostapd/dnsmasq status.
     Read-only - requires no elevation.
@@ -14,10 +14,20 @@
 $Usbipd = if ($env:AIYUSPOT_USBIPD) { $env:AIYUSPOT_USBIPD } else { 'C:\Program Files\usbipd-win\usbipd.exe' }
 $Distro = 'kali-linux'
 
-$profiles = @{
-    '148f:2573' = @{ Name = 'Ralink RT73 USB WiFi'; Module = 'rt73usb'; Note = 'AP ready (WEP/open/WPA2)' }
-    '3625:0110' = @{ Name = 'TP-Link Archer TX1U Nano (AIC8800)'; Module = 'aic8800_fdrv'; Note = 'WiFi 6 - AP verified (all modes)' }
-    'a69c:5721' = @{ Name = 'TP-Link TX1U storage mode'; Module = '(eject -> 3625:0110)'; Note = 'auto-switch via udev/usb_modeswitch' }
+# profiles[id] = @{ Name; Module; Status; Note } - generated from adapters.conf
+$repo = Split-Path $PSScriptRoot -Parent
+$profiles = [ordered]@{}
+$allIds = @()
+$allMods = @()
+Get-Content "$repo\adapters.conf" | Where-Object { $_.Trim() -and $_ -notmatch '^\s*#' } | ForEach-Object {
+    $f = $_ -split '\|'
+    $name = $f[2]; $mod = $f[3]; $status = $f[11]; $note = $f[12]
+    if ($mod -ne '-') { $allMods += $mod }
+    foreach ($id in ($f[0] -split ',')) {
+        $id = $id.Trim().ToLower()
+        $allIds += $id
+        $profiles[$id] = @{ Name = $name; Module = $mod; Status = $status; Note = $note }
+    }
 }
 
 Write-Host '=== WiFi Adapter Check ===' -ForegroundColor Cyan
@@ -31,23 +41,30 @@ foreach ($hwid in $profiles.Keys) {
     if ($line) {
         $busid = ($line.Trim() -split '\s+')[0]
         $state = 'Present'
-        if ($line -match 'Attached') { $state = 'Attached to WSL' }
+        if ($line -match 'Not shared') { $state = 'Present' }
+        elseif ($line -match 'Attached') { $state = 'Attached to WSL' }
         elseif ($line -match 'Shared') { $state = 'Shared (bound)' }
         $p = $profiles[$hwid]
         Write-Host ("  [{0}] {1}  busid={2}  state={3}" -f $hwid, $p.Name, $busid, $state) -ForegroundColor Green
         Write-Host ("       module={0}  | {1}" -f $p.Module, $p.Note) -ForegroundColor DarkGray
+        if ($p.Status -eq 'noap') {
+            Write-Host '       *** no AP mode upstream - cannot host a hotspot ***' -ForegroundColor DarkYellow
+        } elseif ($p.Status -eq 'pending') {
+            Write-Host '       (support pending real-client verification)' -ForegroundColor DarkGray
+        }
         $supported += $hwid
     }
 }
 if (-not $supported) {
     Write-Host '  No supported USB WiFi adapter found.' -ForegroundColor Red
-    Write-Host '  Plug in the RT73 (148f:2573) or TX1U (3625:0110 / a69c:5721).' -ForegroundColor Gray
+    Write-Host '  See adapters.conf for the registered VID:PIDs (docs/adapters.md).' -ForegroundColor Gray
 }
 
 Write-Host ''
 Write-Host '-- Windows PnP state --' -ForegroundColor Yellow
+$pnpRegex = ($allIds | ForEach-Object { 'VID_{0}&PID_{1}' -f ($_ -split ':') }) -join '|'
 $pnp = Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object {
-    $_.InstanceId -match 'VID_148F&PID_2573|VID_3625&PID_0110|VID_A69C&PID_5721'
+    $_.InstanceId -match $pnpRegex
 }
 if ($pnp) {
     foreach ($d in $pnp) {
@@ -72,7 +89,9 @@ foreach ($svc in 'usbipd', 'VBoxUSBMon') {
 
 Write-Host ''
 Write-Host '-- Kali WSL state --' -ForegroundColor Yellow
-$wslOut = wsl.exe -d $Distro -u root -- sh -c "echo USB:; lsusb 2>/dev/null | grep -iE '148f|3625|a69c'; echo MODULES:; lsmod | grep -E 'rt73usb|aic'; echo IFACE:; ip -br link 2>/dev/null | awk '/^[wW]l/ {print}'; echo AP:; pgrep -x hostapd >/dev/null && echo hostapd running || echo hostapd stopped; pgrep -x dnsmasq >/dev/null && echo dnsmasq running || echo dnsmasq stopped" 2>$null
+$idRe = ($allIds | ForEach-Object { [regex]::Escape($_) }) -join '|'
+$modRe = ($allMods | ForEach-Object { [regex]::Escape($_) }) -join '|'
+$wslOut = wsl.exe -d $Distro -u root -- sh -c "echo USB:; lsusb 2>/dev/null | grep -iE '$idRe'; echo MODULES:; lsmod | grep -E '$modRe'; echo IFACE:; ip -br link 2>/dev/null | awk '/^[wW]l/ {print}'; echo AP:; pgrep -x 'hostapd(-wep)?' >/dev/null && echo hostapd running || echo hostapd stopped; pgrep -x dnsmasq >/dev/null && echo dnsmasq running || echo dnsmasq stopped" 2>$null
 if ($LASTEXITCODE -eq 0 -and $wslOut) {
     $wslOut | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
 } else {

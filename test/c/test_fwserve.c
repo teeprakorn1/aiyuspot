@@ -74,8 +74,27 @@ int main(void) {
     snprintf(load_p, sizeof load_p, "%s/dev2/loading", SYSFW);
     CHECK(read_int(load_p) == 0, "missing fw leaves request pending");
 
-    /* Case 3: scan() recurses into nested fw dirs (aic8800DC/<file>) and
-     * serve() finds the file via the vendor-subdir fallback in find_fw */
+    /* Case 3 (real kernel layout): a request for rtlwifi/x.bin appears
+     * as ONE flat sysfs dir named 'rtlwifi!x.bin' (kobject mangles '/'
+     * to '!'). serve() must decode it and find LIBFW/rtlwifi/x.bin. */
+    snprintf(p, sizeof p, "%s/rtlwifi", LIBFW);
+    mkdir(p, 0755);
+    snprintf(p, sizeof p, "%s/rtlwifi/rtl8723bu_nic.bin", LIBFW);
+    write_file(p, "RTLFW9");
+    mk_request("rtlwifi!rtl8723bu_nic.bin", "rtlwifi/rtl8723bu_nic.bin");
+    scan(SYSFW, "");
+    snprintf(load_p, sizeof load_p, "%s/rtlwifi!rtl8723bu_nic.bin/loading", SYSFW);
+    snprintf(data_p, sizeof data_p, "%s/rtlwifi!rtl8723bu_nic.bin/data", SYSFW);
+    f = fopen(data_p, "rb");
+    assert(f);
+    memset(buf, 0, sizeof buf);
+    n = fread(buf, 1, sizeof buf, f);
+    fclose(f);
+    CHECK(n == 6 && memcmp(buf, "RTLFW9", 6) == 0, "'!'-encoded fw name decoded and served");
+    CHECK(read_int(load_p) == 0, "'!'-encoded request completed");
+
+    /* Case 4: nested request dirs still served (scan() recursion kept
+     * for safety; find_fw falls back to one vendor subdir level) */
     snprintf(p, sizeof p, "%s/aic8800DC", LIBFW);
     mkdir(p, 0755);
     snprintf(p, sizeof p, "%s/aic8800DC/fmacfw.bin", LIBFW);
@@ -93,6 +112,18 @@ int main(void) {
     fclose(f);
     CHECK(n == 6 && memcmp(buf, "AICFW!", 6) == 0, "nested firmware served via scan");
     CHECK(read_int(load_p) == 0, "nested request completed");
+
+    /* Case 5: the source blob exists for stat() but errors on fread -
+     * a directory passes stat() while fread() fails with EISDIR.
+     * serve() must abort the request with loading=-1 rather than
+     * committing an empty/truncated payload as a complete blob. */
+    snprintf(p, sizeof p, "%s/dirfw.bin", LIBFW);
+    mkdir(p, 0755);
+    mk_request("dev3", "dirfw.bin");
+    snprintf(p, sizeof p, "%s/dev3", SYSFW);
+    serve(p, "dirfw.bin");
+    snprintf(load_p, sizeof load_p, "%s/dev3/loading", SYSFW);
+    CHECK(read_int(load_p) == -1, "read error aborts request with -1");
 
     printf("%s\n", failed ? "C-TESTS FAILED" : "C-TESTS PASSED");
     return failed ? 1 : 0;

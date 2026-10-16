@@ -1,2 +1,4 @@
 #!/bin/sh
-exit 0
+# STUB_DNSMASQ_RC=N -> nonzero simulates a dnsmasq launch failure
+# (cleanup-trap test: partial bring-up must roll back).
+exit "${STUB_DNSMASQ_RC:-0}"

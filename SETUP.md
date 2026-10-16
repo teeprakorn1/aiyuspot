@@ -2,6 +2,10 @@
 
 This guide walks you through the complete installation process — from a stock Windows machine to a fully functional Wi-Fi hotspot.
 
+> 📘 After installation, see the [User Guide](docs/user-guide.md) for
+> keyboard controls, menu buttons, CLI commands, progress messages, and
+> recovery actions.
+
 ---
 
 ## 🗺️ Installation Roadmap
@@ -11,7 +15,7 @@ This guide walks you through the complete installation process — from a stock 
 | **0** | [Get this repository](#0%EF%B8%8F⃣-get-this-repository) | 🪟 Windows | Everyone — **do this first** |
 | **1** | [WSL2 + Kali Linux](#1%EF%B8%8F⃣-install-wsl2--kali-linux) | 🪟 Windows | All adapters |
 | **2** | [usbipd-win](#2%EF%B8%8F⃣-install-usbipd-win) | 🪟 Windows | All adapters |
-| **3** | [Custom WSL2 Kernel](#3%EF%B8%8F⃣-build-a-custom-wsl2-kernel) | 🐉 Kali / 🪟 Windows | **RT73** (driver) + **TX1U** (build headers) |
+| **3** | [Custom WSL2 Kernel](#3%EF%B8%8F⃣-build-a-custom-wsl2-kernel) | 🐉 Kali / 🪟 Windows | All **in-tree** adapters (drivers) + **TX1U** (build tree) |
 | **4** | [Core Packages & `fwserve`](#4%EF%B8%8F⃣-install-kali-packages--fwserve) | 🐉 Kali | All adapters |
 | **5** | [`hostapd-wep` Binary](#5%EF%B8%8F⃣-build-hostapd-wep-wep--open-modes-only) | 🐉 Kali | **WEP / Open modes only** |
 | **6** | [AIC8800 Driver](#6%EF%B8%8F⃣-install-tx1u-nano-driver-tx1u-only) | 🪟 Windows / 🐉 Kali | **TP-Link TX1U Nano only** |
@@ -30,7 +34,10 @@ cd aiyuspot
 
 > **ℹ️ No git on Windows?** Install [Git for Windows](https://git-scm.com/download/win), or download the repo ZIP from GitHub and extract it instead — the scripts don't need git to run.
 
-> **🔍 Which adapter do I have?** Plug it in, install usbipd-win (Step 2), then run `usbipd list`: `148f:2573` = RT73, `a69c:5721`/`3625:0110` = TX1U.
+Keep the checkout on a Windows drive (for example `D:\aiyuspot`) so
+`wifi-control.bat` can resolve it into `/mnt/<drive>/...` inside WSL.
+
+> **🔍 Which adapter do I have?** Plug it in, install usbipd-win (Step 2), then run `usbipd list` and compare against `adapters.conf` — or just run `wifi-control.bat check`, which names every registered adapter it sees (including `pending`/`noap` ones). Verified: `148f:2573` = RT73, `a69c:5721`/`3625:0110` = TX1U, `7392:a611` = Edimax EW-7611ULB.
 
 ---
 
@@ -44,7 +51,7 @@ wsl --install -d kali-linux
 
 Reboot your PC if prompted, then complete the initial Kali username/password setup.
 
-> **ℹ️ Note:** The launcher scripts expect the exact distribution name **`kali-linux`**. If your distro uses a different name, update the `set "DISTRO=..."` variable inside `wifi-control.bat`.
+> **ℹ️ Note:** The launcher expects the exact distribution name **`kali-linux`**. If your distro uses a different name, update `set "DISTRO=..."` in `wifi-control.bat` and `$Distro = '...'` in `scripts/check-adapters.ps1`.
 
 ---
 
@@ -52,7 +59,7 @@ Reboot your PC if prompted, then complete the initial Kali username/password set
 
 Download and install the latest `.msi` installer from the official [dorssel/usbipd-win releases](https://github.com/dorssel/usbipd-win/releases) page. 
 
-This installs both the `usbipd` background service and the `VBoxUSBMon` USB filter driver (both are automatically started by `wifi-control.bat`).
+This installs the `usbipd` command-line tooling and the `VBoxUSBMon` USB filter driver. `wifi-control.bat` starts `VBoxUSBMon`; make sure the usbipd-win installation is healthy before running `usbipd list`.
 
 **Verify installation:**
 ```bat
@@ -63,29 +70,31 @@ This installs both the `usbipd` background service and the `VBoxUSBMon` USB filt
 
 ## 3️⃣ Build a Custom WSL2 Kernel
 
-The stock Microsoft WSL2 kernel does not include the `rt73usb` driver module. You must compile a custom kernel and point `%USERPROFILE%\.wslconfig` to the resulting image.
+The stock Microsoft WSL2 kernel ships **none** of the in-tree drivers the registry needs (`rt73usb`, `rtl8xxxu`, `mt76x*`, `mt7921u`, `ath9k_htc`, `rtw88_*`). You must compile a custom kernel — `install-rt73.sh` derives the symbol set from `adapters.conf`'s `kconfig` columns — and point `%USERPROFILE%\.wslconfig` to the resulting image.
 
 **Automated (one command, ~20–40 min):**
 ```bat
 wifi-control.bat kernel
 ```
 
-Then add to `%USERPROFILE%\.wslconfig`:
+Then add to `%USERPROFILE%\.wslconfig` if the start flow has not already applied the kernel switch:
 ```ini
 [wsl2]
 kernel=C:\\wsl\\wsl-kernel-bzImage
 ```
-and run `wsl --shutdown` once.
+and run `wsl --shutdown` once. Normally, `wifi-control.bat` applies these steps automatically after provisioning returns kernel-switch-needed and you confirm the prompt.
 
 📖 **Manual step-by-step:** [docs/kernel-build.md](docs/kernel-build.md)
 
-> **💡 Using the TP-Link TX1U Nano?** You don't strictly need the custom kernel *image* — but `aic8800_fdrv` (Step 6) builds out-of-tree against `/lib/modules/$(uname -r)/build`, which the stock WSL2 kernel does **not** ship. Running `wifi-control.bat kernel` installs that build tree, so **run this step for TX1U too** — pointing `.wslconfig` at the new kernel is optional for TX1U.
+> **💡 Using the TP-Link TX1U Nano?** The documented driver path requires the custom kernel image too: `aic8800_fdrv` (Step 6) builds against `/lib/modules/$(uname -r)/build`, which the stock WSL2 kernel does **not** ship. Running `wifi-control.bat kernel` installs the build tree for the new kernel, so point `.wslconfig` at that image and restart WSL before running `wifi-control.bat driver`.
 
 ---
 
 ## 4️⃣ Install Kali Packages & `fwserve`
 
 Inside your **Kali WSL2** terminal, install the required networking utilities, non-free firmware, compiler toolchain, and compile the `fwserve` helper:
+
+> **⚡ Shortcut:** `wifi-control.bat provision` (menu → *Setup → Auto-setup adapter*) reads the detected adapter's spec from `adapters.conf` and installs packages, the firmware package, `fwserve`, and any confirmed kernel/driver requirements. The `wep` and `open` start flows remind you to build `hostapd-wep` when it is missing. The manual steps remain for reference/troubleshooting; the separate `provision` command does not apply the kernel switch itself.
 
 ```bash
 sudo apt update
@@ -95,7 +104,17 @@ sudo apt install -y \
   iw \
   iptables \
   usb-modeswitch \
+  usbutils \
+  kmod \
+  iproute2 \
+  procps \
+  tar \
+  git \
+  python3 \
   firmware-misc-nonfree \
+  firmware-realtek \
+  firmware-mediatek \
+  firmware-ath9k-htc \
   build-essential
 
 # Compile and install the sysfs firmware helper (run from the repo root
@@ -104,7 +123,7 @@ sudo gcc -O2 -o /usr/local/bin/fwserve fwserve/fwserve.c
 sudo chmod 755 /usr/local/bin/fwserve
 ```
 
-> **📡 RT73 firmware note:** `rt73.bin` (from `firmware-misc-nonfree`) must also exist in the WSL2 **init mount namespace**. The launcher stages it automatically on every run — no manual step needed. Details: [docs/prerequisites.md](docs/prerequisites.md).
+> **📡 Firmware notes:** the matched adapter profile's `fw_stage` entries must exist in the WSL2 **init mount namespace**. The launcher stages them automatically on every run — no manual step needed. Details: [docs/prerequisites.md](docs/prerequisites.md).
 
 ---
 
@@ -167,7 +186,7 @@ wifi-control.bat check
 ## ⚠️ Warnings
 
 - **TX1U first plug-in shows a CD-ROM drive** — Windows may pop up a driver CD (`E:`) or an access-denied dialog. That's the storage-mode personality (`a69c:5721`) — click **Cancel** and let the launcher run `usb_modeswitch` to flip it into Wi-Fi mode (`3625:0110`). Do **not** install the bundled Windows driver.
-- **`usbipd bind` hides the adapter from Windows** — while bound, the device won't appear as a normal Wi-Fi adapter in Windows. That's expected; `wifi-control.bat stop` releases it.
+- **`usbipd bind` hides the adapter from Windows** — while bound, the device won't appear as a normal Wi-Fi adapter in Windows. That's expected; `wifi-control.bat stop` detaches it from WSL, but does not unbind the host share. Run `usbipd unbind` when you also want to remove the binding.
 - **The launcher modifies the WSL VM init namespace** — it copies AIC8800 firmware into the init `/lib/firmware` and disables the udev firmware stub there. This affects all WSL2 distros on the machine (in practice: other distros' firmware requests can then be served instead of instantly aborted).
 - **UAC elevation is required** — `usbipd bind` and PnP reset operations need Administrator.
 - **`wifi-control.bat reset` is destructive** — it purges device registry entries; use only for wedged PnP states (Code 19).
@@ -184,7 +203,7 @@ When the hotspot starts cleanly, you should see console output similar to this:
 ```text
 usbipd: info: Device with hardware-id '148f:2573' found at busid '1-5'.
 rt73usb: OK
-wlan0: AP-ENABLED
+Using WiFi interface: wlan0
 net.ipv4.ip_forward = 1
 WiFi started: aiyuspot
 Clients use 192.168.50.x
@@ -193,15 +212,18 @@ Clients use 192.168.50.x
 For the TX1U the sequence is longer — storage-mode attach, `usb_modeswitch` eject, re-attach as `3625:0110`, firmware staging, then:
 
 ```text
-Found TP-Link TX1U (storage mode) [a69c:5721]
-Staging AIC8800 firmware into WSL kernel namespace...
-Attaching adapter in WiFi mode...          [3625:0110]
+Found TP-Link Archer TX1U Nano (AIC8800) [a69c:5721]
+Preparing firmware environment...
+Attaching adapter in WiFi mode...
 aic8800_fdrv: OK
 Using WiFi interface: wlxXXXXXXXXXXXX
-wlxXXXXXXXXXXXX: AP-ENABLED
 WiFi started: aiyuspot
 Mode: WPA2-PSK (CCMP)
 Clients use 192.168.50.x
 ```
 
-🔧 **Running into issues?** Check the [Troubleshooting section in README.md](README.md#%EF%B8%8F-troubleshooting).
+`AP-ENABLED` is written by the daemonized hostapd process to its log,
+not echoed directly by the launcher console. Use `wifi-control.bat diag`
+or inspect `/var/log/aiyuspot.log` when checking daemon startup.
+
+🔧 **Running into issues?** Run `wifi-control.bat diag` first — it merges the Windows (`%TEMP%\aiyuspot-errors.log`) and Kali (`/var/log/aiyuspot.log`) error logs so the actual failure usually shows up there. Then check the [Troubleshooting section in README.md](README.md#%EF%B8%8F-troubleshooting).

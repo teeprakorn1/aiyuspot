@@ -2,6 +2,9 @@ Connected:
 BUSID  VID:PID    DEVICE                                                        STATE
 1-5    148f:2573  54M.USB.......                                                Attached
 2-1    046d:c52b  USB Input Device                                              Not shared
+3-2    7392:a611  Edimax Wi-Fi N150 Bluetooth4.0 USB Adapter                    Not shared
+6-6    148f:7601  MediaTek 802.11 nWLAN                                       Not shared
+9-9    ffff:aaaa  Generic Wireless-N USB Adapter                              Not shared
 
 Persisted:
 GUID      DEVICE

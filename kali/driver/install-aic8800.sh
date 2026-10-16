@@ -70,10 +70,19 @@ make install
 depmod -a
 
 cp "$SRC/aic.rules" /lib/udev/rules.d/
+# Swap firmware atomically: copy first, then replace - a failed cp must
+# not leave the adapter without any firmware.
+rm -rf /lib/firmware/aic8800DC.new
+cp -r "$SRC/fw/aic8800DC" /lib/firmware/aic8800DC.new
 rm -rf /lib/firmware/aic8800DC
-cp -r "$SRC/fw/aic8800DC" /lib/firmware/
+mv /lib/firmware/aic8800DC.new /lib/firmware/aic8800DC
 
 rmmod aic8800_fdrv aic_load_fw 2>/dev/null || true
-modprobe aic8800_fdrv && echo "aic8800_fdrv: OK"
+# A resident old module means the rebuild may silently not take effect:
+# modprobe would succeed while the running code is still the stale one.
+lsmod | grep -q '^aic8800_fdrv ' \
+  && echo "WARNING: old aic8800_fdrv still resident - replug or 'wsl --shutdown' may be required for the new build to take effect"
+modprobe aic8800_fdrv || { echo "modprobe aic8800_fdrv FAILED - check dmesg" >&2; exit 1; }
+echo "aic8800_fdrv: OK"
 
 echo "Driver installed for kernel $KVER. Re-run this script after kernel updates."

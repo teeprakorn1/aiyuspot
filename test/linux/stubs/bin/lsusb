@@ -1,7 +1,8 @@
 #!/bin/sh
 # Fake lsusb: STUB_USB=rt73|tx1u|none
 case "${STUB_USB:-rt73}" in
-  rt73) echo "Bus 001 Device 002: ID 148f:2573 Ralink Technology, Corp. RT2501/RT2573";;
-  tx1u) echo "Bus 001 Device 003: ID 3625:0110 AICSemi AIC8800DC";;
+  rt73)   echo "Bus 001 Device 002: ID 148f:2573 Ralink Technology, Corp. RT2501/RT2573";;
+  tx1u)   echo "Bus 001 Device 003: ID 3625:0110 AICSemi AIC8800DC";;
+  edimax) echo "Bus 001 Device 004: ID 7392:a611 Edimax Technology Co., Ltd EW-7611ULB 802.11b/g/n and Bluetooth 4.0 Adapter";;
 esac
 exit 0

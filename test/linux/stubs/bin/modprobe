@@ -1,2 +1,13 @@
 #!/bin/sh
-exit 0
+# Logs args. usb:* modalias -> simulates a driver binding by raising a
+# phy80211-capable netdev in the stub sysfs (used by provision --generic).
+echo "$@" >>"${STUB_STATE:-/tmp}/modprobe.log" 2>/dev/null
+case "$1" in
+  usb:*)
+    # A failed modprobe binds nothing - only raise the fake netdev on
+    # success, otherwise delta/if-exists checks see a phantom iface.
+    [ "${STUB_MODPROBE_RC:-0}" = "0" ] \
+      && mkdir -p "${SYSFS:-/sys}/class/net/wlxfake/phy80211" 2>/dev/null || true
+    ;;
+esac
+exit "${STUB_MODPROBE_RC:-0}"
